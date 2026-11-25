@@ -1,0 +1,335 @@
+name: Build, Test, Scan & Publish
+
+on:
+  workflow_call:
+    inputs:
+      aspia_version:
+        description: "Aspia v3 version to build (defaults to VERSION file)"
+        type: string
+        required: false
+        default: ""
+      push_images:
+        description: "Push built images to GHCR"
+        type: boolean
+        required: false
+        default: true
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "README.md"
+      - "arcane/**"
+      - "assets/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      aspia_version:
+        description: "Aspia v3 version to build (defaults to VERSION file)"
+        type: string
+        required: false
+        default: ""
+      push_images:
+        description: "Push built images to GHCR"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint Dockerfile & Shell Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Lint shell scripts with ShellCheck
+        run: shellcheck -S warning scripts/*.sh
+
+  resolve:
+    name: Resolve Aspia v3 Release Assets
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      major: ${{ steps.meta.outputs.major }}
+      minor: ${{ steps.meta.outputs.minor }}
+      router_deb_url: ${{ steps.meta.outputs.router_deb_url }}
+      relay_deb_url: ${{ steps.meta.outputs.relay_deb_url }}
+      should_push: ${{ steps.meta.outputs.should_push }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Aspia release metadata and .deb URLs
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.aspia_version }}
+          INPUT_PUSH: ${{ inputs.push_images }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          req_ver="$(printf '%s' "${INPUT_VERSION}" | tr -d ' \t\r\n')"
+          if [ -z "$req_ver" ]; then
+            req_ver="$(tr -d ' \t\r\n' < VERSION)"
+          fi
+
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
+            -o /tmp/releases.json
+
+          if [ "$req_ver" = "latest" ]; then
+            jq -e '
+              [ .[]
+                | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\.")))
+                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+              ][0]
+            ' /tmp/releases.json > /tmp/release.json
+          else
+            jq -e --arg ver "$req_ver" '
+              [ .[]
+                | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
+              ][0]
+            ' /tmp/releases.json > /tmp/release.json
+          fi
+
+          tag_name="$(jq -er '.tag_name' /tmp/release.json)"
+          version="${tag_name#v}"
+          major="${version%%.*}"
+          minor="${version%.*}"
+
+          router_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-router.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
+          relay_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
+
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$INPUT_PUSH" != "false" ]; then
+            should_push="true"
+          else
+            should_push="false"
+          fi
+
+          {
+            echo "version=${version}"
+            echo "major=${major}"
+            echo "minor=${minor}"
+            echo "router_deb_url=${router_deb_url}"
+            echo "relay_deb_url=${relay_deb_url}"
+            echo "should_push=${should_push}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved Aspia v${version} (router: ${router_deb_url}, relay: ${relay_deb_url}, push: ${should_push})"
+
+  build-test-scan:
+    name: Build, Compose Smoke Test & Trivy Scan
+    needs: [lint, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local Router image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: router
+          platforms: linux/amd64
+          load: true
+          tags: aspia-local/router:test
+          build-args: |
+            ASPIA_VERSION=${{ needs.resolve.outputs.version }}
+            ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
+            ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+          cache-from: type=gha,scope=router
+          cache-to: type=gha,mode=max,scope=router
+
+      - name: Build local Relay image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: relay
+          platforms: linux/amd64
+          load: true
+          tags: aspia-local/relay:test
+          build-args: |
+            ASPIA_VERSION=${{ needs.resolve.outputs.version }}
+            ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
+            ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+          cache-from: type=gha,scope=relay
+          cache-to: type=gha,mode=max,scope=relay
+
+      - name: Run Compose end-to-end smoke test
+        env:
+          IMAGE_PREFIX: aspia-local
+          ASPIA_IMAGE_TAG: test
+          ASPIA_RELAY_PUBLIC_ADDRESS: 127.0.0.1
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            docker compose down -v --remove-orphans || true
+          }
+          trap cleanup EXIT
+
+          docker compose up -d
+
+          deadline=$((SECONDS + 60))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            router_health="$(docker inspect -f '{{.State.Health.Status}}' aspia-router 2>/dev/null || echo 'starting')"
+            relay_health="$(docker inspect -f '{{.State.Health.Status}}' aspia-relay 2>/dev/null || echo 'starting')"
+            echo "Healthcheck status -> aspia-router: ${router_health}, aspia-relay: ${relay_health}"
+            if [ "$router_health" = "healthy" ] && [ "$relay_health" = "healthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          [ "$(docker inspect -f '{{.State.Health.Status}}' aspia-router)" = "healthy" ]
+          [ "$(docker inspect -f '{{.State.Health.Status}}' aspia-relay)" = "healthy" ]
+
+          # 驗證容器皆以非特權使用者 (UID 1000) 執行
+          [ "$(docker exec aspia-router id -u)" = "1000" ]
+          [ "$(docker exec aspia-relay id -u)" = "1000" ]
+
+          # 驗證 Router 初始化檔案與公開金鑰傳遞是否正常
+          docker exec aspia-router test -s /etc/aspia/router.conf
+          docker exec aspia-router test -s /etc/aspia/host.pub
+          docker exec aspia-router test -s /etc/aspia/relay.pub
+          docker exec aspia-router test -s /var/lib/aspia/router.db3
+          docker exec aspia-relay test -s /run/aspia-keys/relay.pub
+          docker exec aspia-relay test -s /etc/aspia/relay.conf
+
+          # 驗證 Relay 無法存取 Router 的私密設定檔與資料庫
+          docker exec aspia-relay sh -c '! test -e /etc/aspia/router.conf && ! test -e /var/lib/aspia/router.db3'
+
+          # 驗證唯讀根檔案系統限制生效
+          docker exec aspia-router sh -c '! touch /etc/aspia_ro_probe 2>/dev/null'
+          docker exec aspia-relay sh -c '! touch /etc/aspia_ro_probe 2>/dev/null'
+
+          echo "=== Sanitized Router Logs ==="
+          docker logs aspia-router 2>&1 | sed -E 's/(Password:[[:space:]]*).*/\1[REDACTED]/g'
+          echo "=== Relay Logs ==="
+          docker logs aspia-relay 2>&1
+
+      - name: Scan Router image with Trivy (table)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aspia-local/router:test
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Scan Relay image with Trivy (table)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aspia-local/relay:test
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Generate Trivy SARIF for Router
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aspia-local/router:test
+          format: sarif
+          output: trivy-router.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Router Trivy SARIF
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-router.sarif
+          category: trivy-router
+
+      - name: Generate Trivy SARIF for Relay
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: aspia-local/relay:test
+          format: sarif
+          output: trivy-relay.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Relay Trivy SARIF
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-relay.sarif
+          category: trivy-relay
+
+  publish:
+    name: Publish ${{ matrix.target }} to GHCR
+    needs: [resolve, build-test-scan]
+    if: ${{ needs.resolve.outputs.should_push == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [router, relay]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker metadata and tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.target }}
+          tags: |
+            type=raw,value=${{ needs.resolve.outputs.version }}
+            type=raw,value=${{ needs.resolve.outputs.minor }}
+            type=raw,value=${{ needs.resolve.outputs.major }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push ${{ matrix.target }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          build-args: |
+            ASPIA_VERSION=${{ needs.resolve.outputs.version }}
+            ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
+            ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}

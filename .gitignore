@@ -1,0 +1,7 @@
+.env
+data/
+*.db3
+*.conf
+*.pub
+.DS_Store
+Thumbs.db

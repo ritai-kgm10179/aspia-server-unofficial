@@ -1,0 +1,119 @@
+# 支援 Arcane 管理的 Aspia v3（Router + Relay）Docker Compose 設定
+# 官方文件：https://aspia.org/docs/
+
+x-arcane:
+  # 請將 'your-username' 改為你的 GitHub 帳號，或在 .env 設定 ASPIA_ICON_URL
+  icon: ${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+  urls:
+    - https://aspia.org/docs/
+    - https://github.com/dchapyshev/aspia
+  updater:
+    # 偵測到新映像檔後的延遲更新時數（小時）
+    delay: ${ARCANE_UPDATER_DELAY:-24}
+
+services:
+  aspia-router:
+    image: ${IMAGE_PREFIX:-ghcr.io/your-username/aspia-server-unofficial}/router:${ASPIA_IMAGE_TAG:-3}
+    container_name: aspia-router
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/log/aspia
+    environment:
+      TZ: ${TZ:-UTC}
+      ASPIA_LOG_LEVEL: ${ASPIA_LOG_LEVEL:-1}
+      ASPIA_LOG_TO_STDOUT: ${ASPIA_LOG_TO_STDOUT:-1}
+      ASPIA_LOG_TO_FILE: ${ASPIA_LOG_TO_FILE:-0}
+      ASPIA_MANAGE_CONFIG: ${ASPIA_MANAGE_CONFIG:-true}
+      ASPIA_ROUTER_ACCESS_LOG_DAYS: ${ASPIA_ROUTER_ACCESS_LOG_DAYS:-45}
+      ASPIA_ROUTER_HOST_PORT: ${ASPIA_ROUTER_HOST_PORT:-8061}
+      ASPIA_ROUTER_CLIENT_PORT: ${ASPIA_ROUTER_CLIENT_PORT:-8062}
+      ASPIA_ROUTER_RELAY_PORT: ${ASPIA_ROUTER_RELAY_PORT:-8063}
+      ASPIA_ROUTER_STUN_ENABLED: ${ASPIA_ROUTER_STUN_ENABLED:-1}
+      ASPIA_ROUTER_STUN_PORT: ${ASPIA_ROUTER_STUN_PORT:-8065}
+      ASPIA_ROUTER_HOST_WHITELIST: ${ASPIA_ROUTER_HOST_WHITELIST:-}
+      ASPIA_ROUTER_CLIENT_WHITELIST: ${ASPIA_ROUTER_CLIENT_WHITELIST:-}
+      ASPIA_ROUTER_RELAY_WHITELIST: ${ASPIA_ROUTER_RELAY_WHITELIST:-}
+    ports:
+      - "${ASPIA_ROUTER_HOST_PORT:-8061}:8061/tcp"
+      - "${ASPIA_ROUTER_CLIENT_PORT:-8062}:8062/tcp"
+      - "${ASPIA_ROUTER_STUN_PORT:-8065}:8065/udp"
+      # 若要連接 Docker 外部主機上的獨立 Relay，請取消下方註解以開放 8063 連接埠：
+      # - "${ASPIA_ROUTER_RELAY_PORT:-8063}:8063/tcp"
+    volumes:
+      - aspia-router-config:/etc/aspia
+      - aspia-router-data:/var/lib/aspia
+      # 僅分享公開金鑰給 Relay 容器自動讀取，不含設定檔與資料庫
+      - aspia-public-keys:/run/aspia-keys
+    labels:
+      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+      - com.getarcaneapp.arcane.updater=${ARCANE_UPDATER_ENABLED:-true}
+      - com.getarcaneapp.arcane.updater.delay=${ARCANE_UPDATER_DELAY:-24}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - aspia-net
+
+  aspia-relay:
+    image: ${IMAGE_PREFIX:-ghcr.io/your-username/aspia-server-unofficial}/relay:${ASPIA_IMAGE_TAG:-3}
+    container_name: aspia-relay
+    restart: unless-stopped
+    depends_on:
+      aspia-router:
+        condition: service_healthy
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/log/aspia
+    environment:
+      TZ: ${TZ:-UTC}
+      ASPIA_LOG_LEVEL: ${ASPIA_LOG_LEVEL:-1}
+      ASPIA_LOG_TO_STDOUT: ${ASPIA_LOG_TO_STDOUT:-1}
+      ASPIA_LOG_TO_FILE: ${ASPIA_LOG_TO_FILE:-0}
+      ASPIA_MANAGE_CONFIG: ${ASPIA_MANAGE_CONFIG:-true}
+      ASPIA_ROUTER_ADDRESS: ${ASPIA_ROUTER_ADDRESS:-aspia-router}
+      ASPIA_ROUTER_PORT: ${ASPIA_ROUTER_RELAY_PORT:-8063}
+      ASPIA_ROUTER_PUBLIC_KEY: ${ASPIA_ROUTER_PUBLIC_KEY:-}
+      ASPIA_RELAY_PUBLIC_ADDRESS: ${ASPIA_RELAY_PUBLIC_ADDRESS:?請設定 ASPIA_RELAY_PUBLIC_ADDRESS 為對外公開的 IP 或網域名稱}
+      ASPIA_RELAY_PORT: ${ASPIA_RELAY_PORT:-8070}
+      ASPIA_RELAY_MAX_PEERS: ${ASPIA_RELAY_MAX_PEERS:-100}
+      ASPIA_RELAY_IDLE_TIMEOUT: ${ASPIA_RELAY_IDLE_TIMEOUT:-5}
+    ports:
+      - "${ASPIA_RELAY_PORT:-8070}:8070/tcp"
+    volumes:
+      - aspia-relay-config:/etc/aspia
+      # 以唯讀模式掛載公開金鑰磁碟區
+      - aspia-public-keys:/run/aspia-keys:ro
+    labels:
+      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+      - com.getarcaneapp.arcane.updater=${ARCANE_UPDATER_ENABLED:-true}
+      - com.getarcaneapp.arcane.updater.delay=${ARCANE_UPDATER_DELAY:-24}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - aspia-net
+
+volumes:
+  aspia-router-config:
+  aspia-router-data:
+  aspia-public-keys:
+  aspia-relay-config:
+
+networks:
+  aspia-net:
+    driver: bridge

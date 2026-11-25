@@ -1,0 +1,199 @@
+name: Auto-Update Aspia & Base Image
+
+on:
+  schedule:
+    # 每天 UTC 03:00（台北時間 11:00）自動執行版本檢查
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Force rebuild & publish even if version and base digest have not changed"
+        type: boolean
+        required: false
+        default: false
+      target_version:
+        description: "Optional specific Aspia v3 version (leave empty for latest 3.x)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: auto-update
+  cancel-in-progress: false
+
+jobs:
+  check-updates:
+    name: Check Upstream Aspia & Debian 13-slim Updates
+    runs-on: ubuntu-latest
+    outputs:
+      latest_version: ${{ steps.check.outputs.latest_version }}
+      base_digest: ${{ steps.check.outputs.base_digest }}
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      base_changed: ${{ steps.check.outputs.base_changed }}
+      needs_update: ${{ steps.check.outputs.needs_update }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check latest Aspia v3 release and Debian 13-slim digest
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_VERSION: ${{ inputs.target_version }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          set -euo pipefail
+
+          current_version="$(tr -d ' \t\r\n' < VERSION)"
+          current_digest="$(tr -d ' \t\r\n' < .base-digest)"
+
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
+            -o /tmp/releases.json
+
+          req_ver="$(printf '%s' "${TARGET_VERSION}" | tr -d ' \t\r\n')"
+          if [ -n "$req_ver" ]; then
+            tag_name="$(jq -er --arg ver "$req_ver" '
+              [ .[]
+                | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
+                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+              ][0].tag_name
+            ' /tmp/releases.json)"
+          else
+            tag_name="$(jq -er '
+              [ .[]
+                | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\.")))
+                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+              ][0].tag_name
+            ' /tmp/releases.json)"
+          fi
+          latest_version="${tag_name#v}"
+
+          raw_manifest="$(docker buildx imagetools inspect debian:13-slim --raw)"
+          base_digest="$(printf '%s' "$raw_manifest" | jq -r '
+            if .manifests then
+              ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest // empty)
+            else
+              empty
+            end
+          ')"
+          if [ -z "$base_digest" ]; then
+            base_digest="$(docker buildx imagetools inspect debian:13-slim --format '{{.Manifest.Digest}}')"
+          fi
+
+          version_changed="false"
+          if [ "$latest_version" != "$current_version" ]; then
+            version_changed="true"
+          fi
+
+          base_changed="false"
+          if [ "$base_digest" != "$current_digest" ]; then
+            base_changed="true"
+          fi
+
+          needs_update="false"
+          if [ "$version_changed" = "true" ] || [ "$base_changed" = "true" ] || [ "$FORCE_REBUILD" = "true" ]; then
+            needs_update="true"
+          fi
+
+          {
+            echo "latest_version=${latest_version}"
+            echo "base_digest=${base_digest}"
+            echo "version_changed=${version_changed}"
+            echo "base_changed=${base_changed}"
+            echo "needs_update=${needs_update}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Auto-Update Check Summary"
+            echo "| Item | Current | Upstream | Changed |"
+            echo "| --- | --- | --- | --- |"
+            echo "| Aspia v3 | \`${current_version}\` | \`${latest_version}\` | \`${version_changed}\` |"
+            echo "| debian:13-slim (amd64) | \`${current_digest}\` | \`${base_digest}\` | \`${base_changed}\` |"
+            echo ""
+            echo "Force rebuild: \`${FORCE_REBUILD}\` -> **Needs update: \`${needs_update}\`**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  commit-update:
+    name: Update Version Files & Create Release
+    needs: check-updates
+    if: ${{ needs.check-updates.outputs.needs_update == 'true' && (needs.check-updates.outputs.version_changed == 'true' || needs.check-updates.outputs.base_changed == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update VERSION, Dockerfile, and .base-digest
+        env:
+          LATEST_VERSION: ${{ needs.check-updates.outputs.latest_version }}
+          BASE_DIGEST: ${{ needs.check-updates.outputs.base_digest }}
+          VERSION_CHANGED: ${{ needs.check-updates.outputs.version_changed }}
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' "$LATEST_VERSION" > VERSION
+          printf '%s\n' "$BASE_DIGEST" > .base-digest
+          sed -i -E "s/^ARG ASPIA_VERSION=.*/ARG ASPIA_VERSION=${LATEST_VERSION}/" Dockerfile
+
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            if [ "$VERSION_CHANGED" = "true" ]; then
+              commit_msg="chore: bump Aspia to v${LATEST_VERSION}"
+            else
+              commit_msg="chore: rebuild for debian:13-slim security update"
+            fi
+
+            git add VERSION .base-digest Dockerfile
+            git commit -m "$commit_msg"
+            git push origin HEAD:main
+          fi
+
+      - name: Tag and create GitHub Release on Aspia version bump
+        if: ${{ needs.check-updates.outputs.version_changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST_VERSION: ${{ needs.check-updates.outputs.latest_version }}
+          BASE_DIGEST: ${{ needs.check-updates.outputs.base_digest }}
+        run: |
+          set -euo pipefail
+
+          tag="v${LATEST_VERSION}"
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            git tag -a "$tag" -m "Release ${tag}"
+            git push origin "$tag"
+          fi
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            repo_lower="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+            gh release create "$tag" \
+              --title "Aspia v3 Docker Server ${tag}" \
+              --notes "$(printf 'Automated release tracking upstream [dchapyshev/aspia %s](https://github.com/dchapyshev/aspia/releases/tag/%s) on \`debian:13-slim\` (\`%s\`).\n\n### Container Images\n- \`ghcr.io/%s/router:%s\`\n- \`ghcr.io/%s/relay:%s\`' "$tag" "$tag" "$BASE_DIGEST" "$repo_lower" "$LATEST_VERSION" "$repo_lower" "$LATEST_VERSION")"
+          fi
+
+  build-and-publish:
+    name: Build & Publish Updated Images
+    needs: [check-updates, commit-update]
+    if: ${{ always() && needs.check-updates.outputs.needs_update == 'true' && (needs.commit-update.result == 'success' || needs.commit-update.result == 'skipped') }}
+    uses: ./.github/workflows/build-and-publish.yml
+    with:
+      aspia_version: ${{ needs.check-updates.outputs.latest_version }}
+      push_images: true
+    secrets: inherit

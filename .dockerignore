@@ -1,0 +1,14 @@
+.git
+.github
+.gitignore
+.gitattributes
+.agents/
+AGENTS.md
+LICENSE
+README.md
+compose.yaml
+.env*
+arcane/
+assets/
+VERSION
+.base-digest
