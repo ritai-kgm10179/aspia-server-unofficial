@@ -27,11 +27,11 @@
 
 ## 🚀 快速開始（GitHub 設定）
 
-1. 將本專案推送至你的 GitHub 儲存庫，並確認 GitHub Actions 權限已開啟：
+1. 若為自行 Fork 本專案，請先確認 GitHub Actions 權限已開啟：
    - 前往 **Settings → Actions → General → Workflow permissions**，選擇 **Read and write permissions**。
 2. 執行一次 **Actions → Auto-Update Aspia & Base Image → Run workflow**（可勾選 `force_rebuild`）即可自動建置並推送：
-   - `ghcr.io/<你的帳號>/aspia-server-unofficial/router:3`
-   - `ghcr.io/<你的帳號>/aspia-server-unofficial/relay:3`
+   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/router:3`
+   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:3`
 3. （建議）前往 GitHub Package 設定頁面確認 `router` 與 `relay` 套件的可見性為 **Public**（若設為 Private，請先在 Arcane 中設定 GHCR Registry 登入憑證）。
 
 ---
@@ -40,15 +40,20 @@
 
 ### 範例 1：在 Arcane 建立專案（建議做法）
 
-1. 在 Arcane 左側選單進入 **Projects → Create**（或使用 **GitOps Sync** 直接同步本 GitHub 儲存庫的 [`compose.yaml`](compose.yaml)）。
-2. 將 [`compose.yaml`](compose.yaml) 內容貼入編輯器（或由 GitOps 自動同步），再把以下內容貼入 Arcane 的 **.env Editor**：
+1. 擇一方式匯入專案：
+   - **方法 A（GitOps 同步）**：在 Arcane 左側選單進入 **Projects → Create**（或 **GitOps Sync**）直接同步 `https://github.com/ritai-kgm10179/aspia-server-unofficial` 的 [`compose.yaml`](compose.yaml)。
+   - **方法 B（自訂範本庫一鍵建立）**：在 Arcane **Settings → Templates** 新增本專案的範本庫網址，即可從範本選單直接展開專案：
+     ```text
+     https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/arcane/registry.json
+     ```
+2. 把以下內容貼入 Arcane 的 **.env Editor**（必填項目只有 `ASPIA_RELAY_PUBLIC_ADDRESS`）：
    ```dotenv
    # 必填：填入這台主機對外公開的 IP 或網域名稱
    ASPIA_RELAY_PUBLIC_ADDRESS=aspia.example.com
 
-   # 必填：替換為你自己的 GitHub 帳號或組織名稱
-   IMAGE_PREFIX=ghcr.io/your-username/aspia-server-unofficial
-   ASPIA_ICON_URL=https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg
+   # 選填：預設已指向 ghcr.io/ritai-kgm10179/aspia-server-unofficial（若自行 Fork 可修改）
+   IMAGE_PREFIX=ghcr.io/ritai-kgm10179/aspia-server-unofficial
+   ASPIA_ICON_URL=https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg
 
    # 選填：追蹤所有 v3.x 版本與安全更新
    ASPIA_IMAGE_TAG=3
@@ -157,7 +162,7 @@
    ```yaml
    services:
      aspia-relay:
-       image: ghcr.io/your-username/aspia-server-unofficial/relay:3
+       image: ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:3
        container_name: aspia-relay-edge
        restart: unless-stopped
        read_only: true
@@ -193,7 +198,7 @@
 
 ```bash
 # 1. 下載專案並準備環境變數檔
-git clone https://github.com/your-username/aspia-server-unofficial.git
+git clone https://github.com/ritai-kgm10179/aspia-server-unofficial.git
 cd aspia-server-unofficial
 cp .env.example .env
 
@@ -231,7 +236,7 @@ docker compose logs -f aspia-router
 
 | 變數名稱 | 預設值 | 說明 |
 | --- | --- | --- |
-| `IMAGE_PREFIX` | `ghcr.io/your-username/aspia-server-unofficial` | GHCR 映像檔路徑前綴 |
+| `IMAGE_PREFIX` | `ghcr.io/ritai-kgm10179/aspia-server-unofficial` | GHCR 映像檔路徑前綴 |
 | `ASPIA_IMAGE_TAG` | `3` | 追蹤的映像檔標籤（`3` 會自動接收所有 v3.x 版本與安全更新） |
 | `ARCANE_UPDATER_ENABLED` | `true` | 是否允許 Arcane Auto-Updater 自動更新 |
 | `ARCANE_UPDATER_DELAY` | `24` | Arcane 偵測到新版映像檔後的延遲更新時數（小時） |
@@ -275,7 +280,7 @@ docker compose logs -f aspia-router
 - **雙重觸發條件**：
   1. 上游 `dchapyshev/aspia` 發布新的 `3.x` 穩定版（含 `x86_64`/`amd64` `.deb` 套件）。
   2. `debian:13-slim` (`linux/amd64`) 基底映像檔有安全更新（Manifest Digest 變動）。
-- **自動化流程**：更新 `VERSION` / `Dockerfile` / `.base-digest` → 提交並建立 GitHub Release → 呼叫 [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 完成 Hadolint、ShellCheck、Compose 端對端健康檢查測試、Trivy 弱點掃描，最後推送包含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR。
+- **自動化流程**：更新 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json) → 提交並建立 GitHub Release → 呼叫 [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 完成 Hadolint、ShellCheck、Compose 端對端健康檢查測試、Trivy 弱點掃描，最後推送包含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR。
 - **搭配 Arcane Auto-Updater**：只要 Compose 中追蹤 `:3` 標籤並保留 `com.getarcaneapp.arcane.updater=true`，Arcane 就會在冷卻期後自動下載（pull）並重建容器。
 
 ---

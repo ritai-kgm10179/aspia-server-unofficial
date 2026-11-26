@@ -1,0 +1,29 @@
+{
+  "$schema": "https://registry.getarcane.app/schema.json",
+  "name": "Aspia v3 Docker 範本庫",
+  "description": "非官方 Aspia v3 NAT 穿透伺服器（Router + Relay）Arcane 自訂範本索引",
+  "version": "1.0.0",
+  "author": "ritai-kgm10179",
+  "url": "https://github.com/ritai-kgm10179/aspia-server-unofficial",
+  "templates": [
+    {
+      "id": "aspia-server-v3",
+      "name": "Aspia v3 Server (Router + Relay)",
+      "description": "基於最小化穩定版 Debian 13 (slim) 的 Aspia v3 NAT 穿透伺服器 Docker 堆疊（包含 Router、內建 STUN 與 Relay），支援安全強化設定與自動金鑰傳遞。",
+      "version": "3.4.3",
+      "author": "ritai-kgm10179",
+      "compose_url": "https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/compose.yaml",
+      "env_url": "https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/.env.example",
+      "documentation_url": "https://github.com/ritai-kgm10179/aspia-server-unofficial#readme",
+      "icon_url": "https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg",
+      "tags": [
+        "remote-desktop",
+        "aspia",
+        "relay",
+        "router",
+        "stun",
+        "self-hosted"
+      ]
+    }
+  ]
+}

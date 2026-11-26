@@ -2,8 +2,8 @@
 # 官方文件：https://aspia.org/docs/
 
 x-arcane:
-  # 請將 'your-username' 改為你的 GitHub 帳號，或在 .env 設定 ASPIA_ICON_URL
-  icon: ${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+  # 若有自訂圖示網址，可在 .env 覆寫 ASPIA_ICON_URL
+  icon: ${ASPIA_ICON_URL:-https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg}
   urls:
     - https://aspia.org/docs/
     - https://github.com/dchapyshev/aspia
@@ -13,7 +13,7 @@ x-arcane:
 
 services:
   aspia-router:
-    image: ${IMAGE_PREFIX:-ghcr.io/your-username/aspia-server-unofficial}/router:${ASPIA_IMAGE_TAG:-3}
+    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/router:${ASPIA_IMAGE_TAG:-3}
     container_name: aspia-router
     restart: unless-stopped
     read_only: true
@@ -51,7 +51,7 @@ services:
       # 僅分享公開金鑰給 Relay 容器自動讀取，不含設定檔與資料庫
       - aspia-public-keys:/run/aspia-keys
     labels:
-      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg}
       - com.getarcaneapp.arcane.updater=${ARCANE_UPDATER_ENABLED:-true}
       - com.getarcaneapp.arcane.updater.delay=${ARCANE_UPDATER_DELAY:-24}
     logging:
@@ -63,7 +63,7 @@ services:
       - aspia-net
 
   aspia-relay:
-    image: ${IMAGE_PREFIX:-ghcr.io/your-username/aspia-server-unofficial}/relay:${ASPIA_IMAGE_TAG:-3}
+    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/relay:${ASPIA_IMAGE_TAG:-3}
     container_name: aspia-relay
     restart: unless-stopped
     depends_on:
@@ -97,7 +97,7 @@ services:
       # 以唯讀模式掛載公開金鑰磁碟區
       - aspia-public-keys:/run/aspia-keys:ro
     labels:
-      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg}
+      - com.getarcaneapp.arcane.icon=${ASPIA_ICON_URL:-https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg}
       - com.getarcaneapp.arcane.updater=${ARCANE_UPDATER_ENABLED:-true}
       - com.getarcaneapp.arcane.updater.delay=${ARCANE_UPDATER_DELAY:-24}
     logging:

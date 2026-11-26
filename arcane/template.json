@@ -1,8 +1,8 @@
 {
   "name": "Aspia v3 Server (Router + Relay)",
   "description": "基於最小化穩定版 Debian 13 (slim) 的 Aspia v3 NAT 穿透伺服器 Docker 堆疊（包含 Router、內建 STUN 與 Relay），支援安全強化設定與自動金鑰傳遞。",
-  "author": "aspia-server-unofficial",
-  "icon_url": "https://raw.githubusercontent.com/your-username/aspia-server-unofficial/main/assets/aspia-icon.svg",
+  "author": "ritai-kgm10179",
+  "icon_url": "https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg",
   "tags": [
     "remote-desktop",
     "aspia",
