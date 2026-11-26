@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tzdata \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && (getent group "${ASPIA_GID}" >/dev/null || groupadd -g "${ASPIA_GID}" aspia) \
-    && (id -u "${ASPIA_UID}" >/dev/null 2>&1 || useradd -u "${ASPIA_UID}" -g "${ASPIA_GID}" -d /var/lib/aspia -s /bin/sh -M aspia) \
+    && (id -u "${ASPIA_UID}" >/dev/null 2>&1 || useradd -l -u "${ASPIA_UID}" -g "${ASPIA_GID}" -d /var/lib/aspia -s /bin/sh -M aspia) \
     && mkdir -p /etc/aspia /var/lib/aspia /var/log/aspia /run/aspia-keys /usr/local/lib/aspia \
     && chown -R "${ASPIA_UID}:${ASPIA_GID}" /etc/aspia /var/lib/aspia /var/log/aspia /run/aspia-keys
 
