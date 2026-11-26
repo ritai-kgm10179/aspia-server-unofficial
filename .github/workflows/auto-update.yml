@@ -12,7 +12,7 @@ on:
         required: false
         default: false
       target_version:
-        description: "Optional specific Aspia v3 version (leave empty for latest 3.x)"
+        description: "Optional specific Aspia version (leave empty for latest stable)"
         type: string
         required: false
         default: ""
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   check-updates:
-    name: Check Upstream Aspia & Debian 13-slim Updates
+    name: Check Upstream Aspia & Debian stable-slim Updates
     runs-on: ubuntu-latest
     outputs:
       current_version: ${{ steps.check.outputs.current_version }}
@@ -36,6 +36,7 @@ jobs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       base_changed: ${{ steps.check.outputs.base_changed }}
       needs_update: ${{ steps.check.outputs.needs_update }}
+      version_source: ${{ steps.check.outputs.version_source }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +44,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Check latest Aspia v3 release and Debian 13-slim digest
+      - name: Check latest Aspia release and Debian stable-slim digest
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,33 +56,75 @@ jobs:
           current_version="$(tr -d ' \t\r\n' < VERSION)"
           current_digest="$(tr -d ' \t\r\n' < .base-digest)"
 
-          curl -fsSL \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
-            -o /tmp/releases.json
-
           req_ver="$(printf '%s' "${TARGET_VERSION}" | tr -d ' \t\r\n')"
-          if [ -n "$req_ver" ]; then
-            tag_name="$(jq -er --arg ver "$req_ver" '
-              [ .[]
-                | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
-                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
-                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
-              ][0].tag_name
-            ' /tmp/releases.json)"
-          else
-            tag_name="$(jq -er '
-              [ .[]
-                | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\.")))
-                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
-                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
-              ][0].tag_name
-            ' /tmp/releases.json)"
-          fi
-          latest_version="${tag_name#v}"
+          req_ver="${req_ver#v}"
+          latest_version=""
+          version_source=""
 
-          raw_manifest="$(docker buildx imagetools inspect debian:13-slim --raw)"
+          if [ -n "$req_ver" ]; then
+            if curl -fsSL --retry 2 --retry-delay 2 "https://aspia.org/updates/versions/${req_ver}.json" -o /tmp/manifest.json 2>/dev/null; then
+              if jq -e '
+                (.path // empty | length > 0)
+                and ([.packages.router.linux.x86_64[]? | select(.format == "deb")][0].file // empty | length > 0)
+                and ([.packages.relay.linux.x86_64[]? | select(.format == "deb")][0].file // empty | length > 0)
+              ' /tmp/manifest.json >/dev/null 2>&1; then
+                latest_version="$req_ver"
+                version_source="aspia.org/updates/versions/${req_ver}.json"
+              fi
+            fi
+
+            if [ -z "$latest_version" ]; then
+              curl -fsSL \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
+                -o /tmp/releases.json
+              tag_name="$(jq -er --arg ver "$req_ver" '
+                [ .[]
+                  | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
+                  | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                  | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+                ][0].tag_name
+              ' /tmp/releases.json)"
+              latest_version="${tag_name#v}"
+              version_source="github.com/dchapyshev/aspia/releases (fallback)"
+            fi
+          else
+            if curl -fsSL --retry 2 --retry-delay 2 "https://aspia.org/updates/stable.json" -o /tmp/stable.json 2>/dev/null; then
+              candidate="$(jq -r '.targets.latest // empty' /tmp/stable.json)"
+              candidate="${candidate#v}"
+              if printf '%s' "$candidate" | grep -Eq '^([3-9]|[1-9][0-9]+)\.' \
+                && curl -fsSL --retry 2 --retry-delay 2 "https://aspia.org/updates/versions/${candidate}.json" -o /tmp/manifest.json 2>/dev/null; then
+                if jq -e '
+                  (.path // empty | length > 0)
+                  and ([.packages.router.linux.x86_64[]? | select(.format == "deb")][0].file // empty | length > 0)
+                  and ([.packages.relay.linux.x86_64[]? | select(.format == "deb")][0].file // empty | length > 0)
+                ' /tmp/manifest.json >/dev/null 2>&1; then
+                  latest_version="$candidate"
+                  version_source="aspia.org/updates/stable.json"
+                fi
+              fi
+            fi
+
+            if [ -z "$latest_version" ]; then
+              curl -fsSL \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
+                -o /tmp/releases.json
+              tag_name="$(jq -er '
+                [ .[]
+                  | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?([3-9]|[1-9][0-9]+)\\.")))
+                  | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                  | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+                ][0].tag_name
+              ' /tmp/releases.json)"
+              latest_version="${tag_name#v}"
+              version_source="github.com/dchapyshev/aspia/releases (fallback)"
+            fi
+          fi
+
+          raw_manifest="$(docker buildx imagetools inspect debian:stable-slim --raw)"
           base_digest="$(printf '%s' "$raw_manifest" | jq -r '
             if .manifests then
               ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest // empty)
@@ -90,7 +133,7 @@ jobs:
             end
           ')"
           if [ -z "$base_digest" ]; then
-            base_digest="$(docker buildx imagetools inspect debian:13-slim --format '{{.Manifest.Digest}}')"
+            base_digest="$(docker buildx imagetools inspect debian:stable-slim --format '{{.Manifest.Digest}}')"
           fi
 
           version_changed="false"
@@ -116,16 +159,17 @@ jobs:
             echo "version_changed=${version_changed}"
             echo "base_changed=${base_changed}"
             echo "needs_update=${needs_update}"
+            echo "version_source=${version_source}"
           } >> "$GITHUB_OUTPUT"
 
           {
             echo "### Auto-Update Check Summary"
             echo "| Item | Current | Upstream | Changed |"
             echo "| --- | --- | --- | --- |"
-            echo "| Aspia v3 | \`${current_version}\` | \`${latest_version}\` | \`${version_changed}\` |"
-            echo "| debian:13-slim (amd64) | \`${current_digest}\` | \`${base_digest}\` | \`${base_changed}\` |"
+            echo "| Aspia | \`${current_version}\` | \`${latest_version}\` | \`${version_changed}\` |"
+            echo "| debian:stable-slim (amd64) | \`${current_digest}\` | \`${base_digest}\` | \`${base_changed}\` |"
             echo ""
-            echo "Force rebuild: \`${FORCE_REBUILD}\` -> **Needs update: \`${needs_update}\`**"
+            echo "Source: \`${version_source}\` · Force rebuild: \`${FORCE_REBUILD}\` -> **Needs update: \`${needs_update}\`**"
           } >> "$GITHUB_STEP_SUMMARY"
 
   create-update-pr:
@@ -153,6 +197,7 @@ jobs:
           BASE_DIGEST: ${{ needs.check-updates.outputs.base_digest }}
           VERSION_CHANGED: ${{ needs.check-updates.outputs.version_changed }}
           BASE_CHANGED: ${{ needs.check-updates.outputs.base_changed }}
+          VERSION_SOURCE: ${{ needs.check-updates.outputs.version_source }}
         run: |
           set -euo pipefail
 
@@ -169,14 +214,14 @@ jobs:
           fi
 
           if [ "$VERSION_CHANGED" = "true" ] && [ "$BASE_CHANGED" = "true" ]; then
-            commit_msg="chore: bump Aspia to v${LATEST_VERSION} and update debian:13-slim"
-            pr_title="chore: 更新 Aspia v${LATEST_VERSION} 與 debian:13-slim 基底映像檔"
+            commit_msg="chore: bump Aspia to v${LATEST_VERSION} and update debian:stable-slim"
+            pr_title="chore: 更新 Aspia v${LATEST_VERSION} 與 debian:stable-slim 基底映像檔"
           elif [ "$VERSION_CHANGED" = "true" ]; then
             commit_msg="chore: bump Aspia to v${LATEST_VERSION}"
             pr_title="chore: 更新 Aspia 至 v${LATEST_VERSION}"
           else
-            commit_msg="chore: rebuild for debian:13-slim security update"
-            pr_title="chore: 更新 debian:13-slim 基底映像檔以修補安全性更新"
+            commit_msg="chore: rebuild for debian:stable-slim security update"
+            pr_title="chore: 更新 debian:stable-slim 基底映像檔以修補安全性更新"
           fi
 
           remote_exists="false"
@@ -209,9 +254,10 @@ jobs:
             echo ""
             echo "| 項目 | 目前版本／Digest | 上游最新 | 是否變動 |"
             echo "| --- | --- | --- | --- |"
-            echo "| Aspia v3 | \`${CURRENT_VERSION}\` | \`${LATEST_VERSION}\` | \`${VERSION_CHANGED}\` |"
-            echo "| debian:13-slim (amd64) | \`${CURRENT_DIGEST}\` | \`${BASE_DIGEST}\` | \`${BASE_CHANGED}\` |"
+            echo "| Aspia | \`${CURRENT_VERSION}\` | \`${LATEST_VERSION}\` | \`${VERSION_CHANGED}\` |"
+            echo "| debian:stable-slim (amd64) | \`${CURRENT_DIGEST}\` | \`${BASE_DIGEST}\` | \`${BASE_CHANGED}\` |"
             echo ""
+            echo "- 版本來源：\`${VERSION_SOURCE}\`"
             echo "- 所有必要檢查（\`Lint Dockerfile & Shell Scripts\`、\`Resolve Aspia v3 Release Assets\`、\`Build, Compose Smoke Test & Trivy Scan\`）通過並合併至 \`main\` 後，\`Build, Test, Scan & Publish\` 將自動建置、弱點掃描、推送新版映像檔至 GHCR，並於版號更新時建立 GitHub Release。"
             if [ "$HAS_CUSTOM_TOKEN" != "true" ]; then
               echo "- ℹ️ **提示**：目前使用預設 \`GITHUB_TOKEN\` 建立 PR；依 GitHub 安全機制，預設權杖開立的 PR 不會自動觸發 \`pull_request\` 檢查工作流程。請於 PR 頁面先關閉再重新開啟一次以觸發這 3 項必要檢查，或於 **Settings → Secrets and variables → Actions** 新增 \`AUTO_UPDATE_TOKEN\` Secret 以實現全自動檢查與 Auto-merge。"

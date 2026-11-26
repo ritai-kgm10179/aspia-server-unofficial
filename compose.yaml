@@ -13,7 +13,7 @@ x-arcane:
 
 services:
   aspia-router:
-    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/router:${ASPIA_IMAGE_TAG:-3}
+    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/router:${ASPIA_IMAGE_TAG:-latest}
     container_name: aspia-router
     restart: unless-stopped
     read_only: true
@@ -63,7 +63,7 @@ services:
       - aspia-net
 
   aspia-relay:
-    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/relay:${ASPIA_IMAGE_TAG:-3}
+    image: ${IMAGE_PREFIX:-ghcr.io/ritai-kgm10179/aspia-server-unofficial}/relay:${ASPIA_IMAGE_TAG:-latest}
     container_name: aspia-relay
     restart: unless-stopped
     depends_on:

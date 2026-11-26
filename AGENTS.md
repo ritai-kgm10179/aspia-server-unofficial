@@ -4,7 +4,7 @@
 
 ## 1. 專案定位與架構不變量
 
-- **基底作業系統**：一律採用最新最小化穩定版 `debian:13-slim`（Debian 13 Trixie）。由於上游 `dchapyshev/aspia` 官方釋出的伺服器 `.deb` 為 glibc 連結的 `x86_64`（`amd64`）執行檔，不得任意替換為 Alpine (musl)。
+- **基底作業系統**：一律採用最新最小化穩定版 `debian:stable-slim`（隨 Debian 官方穩定版自動追蹤大版本與安全更新）。由於上游 `dchapyshev/aspia` 官方釋出的伺服器 `.deb` 為 glibc 連結的 `x86_64`（`amd64`）執行檔，不得任意替換為 Alpine (musl)。
 - **單一容器單一服務**：維持 [Dockerfile](Dockerfile) 的多目標設計，將 `aspia_router`（`router` 目標）與 `aspia_relay`（`relay` 目標）拆分建置，不可合併成單一容器多程序。
 - **最小權限與安全強化**：
   - 預設以非特權使用者 `aspia`（`UID/GID 1000`）執行，僅於明確以 root 啟動時透過 `setpriv` 降權。
@@ -35,6 +35,6 @@
 
 ## 5. 版號、機密資料與授權邊界
 
-- 更新 Aspia 版本時，須同步維護 [VERSION](VERSION) 與 [Dockerfile](Dockerfile) 中的 `ARG ASPIA_VERSION`，不可只改單一檔案。
+- 更新 Aspia 版本時，須同步維護 [VERSION](VERSION) 與 [Dockerfile](Dockerfile) 中的 `ARG ASPIA_VERSION`，不可只改單一檔案；上游版本優先查詢官網穩定版通道 `https://aspia.org/updates/stable.json`（含官方 `sha256` 校驗碼），並以 GitHub Releases API 作為備援。
 - 嚴禁將 `.env`、`*.db3`、`*.conf`、`*.pub` 或任何金鑰／憑證納入版控。
 - **授權邊界**：本儲存庫原創檔案以 **CC0 1.0 Universal** 釋出；建置後之容器映像檔因內含上游 `dchapyshev/aspia` 執行檔，其 OCI 授權標籤維持 `GPL-3.0-or-later`。

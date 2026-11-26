@@ -1,6 +1,6 @@
 # Aspia v3 Server Docker (Router + Relay) — Arcane Ready
 
-專為 **GitHub Container Registry (GHCR)** 與 **[Arcane](https://getarcane.app/)** 管理的非官方 **Aspia v3** Docker 映像檔與 Compose 堆疊（Stack），採用最新最小化穩定版 **Debian 13 (`debian:13-slim`)** 建置，並內建**每日自動檢查版本與安全更新並重新發布映像檔**的 GitHub Actions 工作流程。
+專為 **GitHub Container Registry (GHCR)** 與 **[Arcane](https://getarcane.app/)** 管理的非官方 **Aspia v3+** Docker 映像檔與 Compose 堆疊（Stack），採用最新最小化穩定版 **Debian (`debian:stable-slim`)** 建置，並內建**每日自動檢查版本與安全更新並重新發布映像檔**的 GitHub Actions 工作流程。
 
 > [!WARNING]
 > **免責聲明**：本專案由 AI 服務產製，非 Aspia 官方維護專案；部署於正式環境前請自行審閱所有腳本與設定，使用請自負風險。
@@ -9,7 +9,7 @@
 
 ## ✨ 設計特色
 
-- **最新最小化基底 OS (`debian:13-slim`)**：直接安裝官方釋出的 Aspia v3 `.deb` 原生套件，兼具最小攻擊面（Arcane / Trivy 弱點掃描友善）與完整相容性。
+- **最新最小化基底 OS (`debian:stable-slim`)**：隨 Debian 官方穩定版自動追蹤大版本與安全更新，直接安裝官方釋出的 Aspia `.deb` 原生套件並驗證官方 SHA-256 校驗碼，兼具最小攻擊面（Arcane / Trivy 弱點掃描友善）與完整相容性。
 - **單一容器單一服務架構**：將 `aspia_router`（內含 STUN）與 `aspia_relay` 拆分為獨立的 `router` 與 `relay` 映像檔，符合 Docker 最佳實踐，也能各自擴展或單獨部署外部 Relay。
 - **安全強化 (Hardened by Default)**：
   - 非特權使用者 `aspia` (`UID/GID 1000`) 執行，支援 `PUID`/`PGID` 透過 `setpriv` 降權。
@@ -21,7 +21,7 @@
   - 使用具名磁碟區（Volume），方便透過 Arcane Volume Backups 備份設定與資料庫。
   - 無額外相依套件、零日誌干擾的被動式 `HEALTHCHECK`（檢查 PID 1 與 `/proc/net/tcp` 監聽狀態）。
 - **全自動版本追蹤與映像檔更新**：
-  - [`.github/workflows/auto-update.yml`](.github/workflows/auto-update.yml) 每日定時檢查 `dchapyshev/aspia` 最新穩定版 `3.x` 與 `debian:13-slim` 基底映像檔 Digest，有更新即自動建立或更新 `chore/auto-update` Pull Request（相容 `main` 分支 Ruleset 保護規則）；待必要檢查全數通過並合併至 `main` 後，隨即自動建置新版映像檔推送至 GHCR 並建立 GitHub Release。
+  - [`.github/workflows/auto-update.yml`](.github/workflows/auto-update.yml) 每日定時查詢官網 `aspia.org/updates/stable.json` 最新穩定版通道（自動追蹤跨大版本正式版，並以 GitHub Releases API 作為備援）與 `debian:stable-slim` 基底映像檔 Digest，有更新即自動建立或更新 `chore/auto-update` Pull Request（相容 `main` 分支 Ruleset 保護規則）；待必要檢查全數通過並合併至 `main` 後，隨即自動建置新版映像檔推送至 GHCR 並建立 GitHub Release。
 
 ---
 
@@ -32,8 +32,8 @@
    - （選用）前往 **Settings → General → Pull Requests**，勾選 **Allow auto-merge**，即可讓自動更新 PR 於檢查通過後自動合併。
    - （選用）若啟用了要求 PR 必要檢查的 Branch Ruleset，可於 **Settings → Secrets and variables → Actions** 新增具備本儲存庫 `Contents: Read and write` 與 `Pull requests: Read and write` 權限的 Fine-grained PAT `AUTO_UPDATE_TOKEN`，讓機器人建立的 PR 能全自動觸發檢查與 Auto-merge。
 2. 執行一次 **Actions → Auto-Update Aspia & Base Image → Run workflow**（可勾選 `force_rebuild`）即可自動建置並推送：
-   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/router:3`
-   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:3`
+   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/router:latest`
+   - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:latest`
 3. （建議）前往 GitHub Package 設定頁面確認 `router` 與 `relay` 套件的可見性為 **Public**（若設為 Private，請先在 Arcane 中設定 GHCR Registry 登入憑證）。
 
 ---
@@ -57,8 +57,8 @@
    IMAGE_PREFIX=ghcr.io/ritai-kgm10179/aspia-server-unofficial
    ASPIA_ICON_URL=https://raw.githubusercontent.com/ritai-kgm10179/aspia-server-unofficial/main/assets/aspia-icon.svg
 
-   # 選填：追蹤所有 v3.x 版本與安全更新
-   ASPIA_IMAGE_TAG=3
+   # 選填：追蹤最新穩定版（含未來大版本）；若想鎖定特定大版本可改為如 3
+   ASPIA_IMAGE_TAG=latest
    TZ=Asia/Taipei
    ARCANE_UPDATER_ENABLED=true
    ARCANE_UPDATER_DELAY=24
@@ -164,7 +164,7 @@
    ```yaml
    services:
      aspia-relay:
-       image: ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:3
+       image: ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:latest
        container_name: aspia-relay-edge
        restart: unless-stopped
        read_only: true
@@ -207,11 +207,11 @@ cp .env.example .env
 # 2. 編輯 .env，至少填入 ASPIA_RELAY_PUBLIC_ADDRESS 與 IMAGE_PREFIX=aspia-local
 sed -i 's|^ASPIA_RELAY_PUBLIC_ADDRESS=.*|ASPIA_RELAY_PUBLIC_ADDRESS=你的公開IP或網域|' .env
 sed -i 's|^IMAGE_PREFIX=.*|IMAGE_PREFIX=aspia-local|' .env
-sed -i 's|^ASPIA_IMAGE_TAG=.*|ASPIA_IMAGE_TAG=3.4.3|' .env
+sed -i 's|^ASPIA_IMAGE_TAG=.*|ASPIA_IMAGE_TAG=3.5.2|' .env
 
 # 3. 使用 Docker Buildx 分別建置 router 與 relay 映像檔
-docker build --target router -t aspia-local/router:3.4.3 .
-docker build --target relay  -t aspia-local/relay:3.4.3 .
+docker build --target router -t aspia-local/router:3.5.2 .
+docker build --target relay  -t aspia-local/relay:3.5.2 .
 
 # 4. 啟動服務並檢視首次產生的 admin 密碼
 docker compose up -d
@@ -239,7 +239,7 @@ docker compose logs -f aspia-router
 | 變數名稱 | 預設值 | 說明 |
 | --- | --- | --- |
 | `IMAGE_PREFIX` | `ghcr.io/ritai-kgm10179/aspia-server-unofficial` | GHCR 映像檔路徑前綴 |
-| `ASPIA_IMAGE_TAG` | `3` | 追蹤的映像檔標籤（`3` 會自動接收所有 v3.x 版本與安全更新） |
+| `ASPIA_IMAGE_TAG` | `latest` | 追蹤的映像檔標籤（`latest` 會自動接收最新穩定版與大版本更新；若想鎖定特定大版本可改為如 `3`） |
 | `ARCANE_UPDATER_ENABLED` | `true` | 是否允許 Arcane Auto-Updater 自動更新 |
 | `ARCANE_UPDATER_DELAY` | `24` | Arcane 偵測到新版映像檔後的延遲更新時數（小時） |
 | `TZ` | `UTC`（`.env.example` 為 `Asia/Taipei`） | 容器時區 |
@@ -280,11 +280,11 @@ docker compose logs -f aspia-router
 
 - **排程檢查**：[`.github/workflows/auto-update.yml`](.github/workflows/auto-update.yml) 每天 UTC 03:00（台北時間 11:00）自動執行。
 - **雙重觸發條件**：
-  1. 上游 `dchapyshev/aspia` 發布新的 `3.x` 穩定版（含 `x86_64`/`amd64` `.deb` 套件）。
-  2. `debian:13-slim` (`linux/amd64`) 基底映像檔有安全更新（Manifest Digest 變動）。
+  1. 官網穩定版通道 `https://aspia.org/updates/stable.json`（含對應版本 Manifest 的官方 `.deb` 下載路徑與 `sha256` 校驗碼，並以 `dchapyshev/aspia` GitHub Releases API 作為備援）發布新的 `3.x` 以上正式版（含未來大版本，排除 `draft` 與 `prerelease`）。
+  2. `debian:stable-slim` (`linux/amd64`) 基底映像檔有大版本或安全更新（Manifest Digest 變動）。
 - **自動化流程**：偵測到更新時，先建立或更新 `chore/auto-update` 分支（同步修改 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json)）並自動開立 Pull Request（支援嘗試啟用 squash Auto-merge）→ 通過 `main` 分支 Ruleset 的 3 項必要檢查（Hadolint / ShellCheck、Release 資產解析、Compose 端對端煙霧測試與 Trivy 掃描）並合併至 `main` 後 → [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 自動建置並推送含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR，且建立對應的 GitHub Release；若手動觸發 `force_rebuild` 且無檔案異動，則直接重新建置與發布。
 - **全自動 PR 檢查權杖（選用）**：因 GitHub 預設會阻擋 `GITHUB_TOKEN` 開立的 PR 自動觸發 `pull_request` 工作流程，若希望每日自動 PR 不需手動「關閉後重開」即可自動執行檢查並啟用 Auto-merge，可於 **Settings → Secrets and variables → Actions** 建立 Fine-grained PAT Secret `AUTO_UPDATE_TOKEN`（僅需本儲存庫 `Contents: Read and write` 與 `Pull requests: Read and write` 權限）。
-- **搭配 Arcane Auto-Updater**：只要 Compose 中追蹤 `:3` 標籤並保留 `com.getarcaneapp.arcane.updater=true`，Arcane 就會在冷卻期後自動下載（pull）並重建容器。
+- **搭配 Arcane Auto-Updater**：預設 Compose 追蹤 `:latest` 標籤並保留 `com.getarcaneapp.arcane.updater=true`，Arcane 就會在冷卻期後自動下載（pull）並重建容器（若不希望自動跨大版本，可將 `.env` 的 `ASPIA_IMAGE_TAG` 改為指定大版本如 `3`）。
 
 ---
 
