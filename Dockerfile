@@ -40,19 +40,9 @@ RUN --mount=type=secret,id=github_token \
           "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" -o /tmp/releases.json; \
       fi; \
       if [ "$ASPIA_VERSION" = "latest" ]; then \
-        jq -e '
-          [ .[]
-            | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\.")))
-            | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
-            | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
-          ][0]
-        ' /tmp/releases.json > /tmp/release.json; \
+        jq -e '[ .[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\."))) | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$"))) | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$"))) ][0]' /tmp/releases.json > /tmp/release.json; \
       else \
-        jq -e --arg ver "$ASPIA_VERSION" '
-          [ .[]
-            | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
-          ][0]
-        ' /tmp/releases.json > /tmp/release.json; \
+        jq -e --arg ver "$ASPIA_VERSION" '[ .[] | select(.tag_name == ("v" + $ver) or .tag_name == $ver) ][0]' /tmp/releases.json > /tmp/release.json; \
       fi; \
       if [ -z "$router_url" ]; then \
         router_url="$(jq -er '[.assets[] | select(.name | test("^aspia-router.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"; \
@@ -108,9 +98,9 @@ LABEL org.opencontainers.image.title="Aspia Router v3" \
       org.opencontainers.image.documentation="https://aspia.org/docs/"
 
 # hadolint ignore=DL3008
-RUN --mount=type=bind,from=fetcher,source=/downloads,target=/tmp/downloads \
-    apt-get update && apt-get install -y --no-install-recommends /tmp/downloads/aspia-router.deb \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* \
+RUN --mount=type=bind,from=fetcher,source=/downloads,target=/mnt/downloads \
+    apt-get update && apt-get install -y --no-install-recommends /mnt/downloads/aspia-router.deb \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && command -v aspia_router
 
 COPY --chmod=0755 scripts/entrypoint-router.sh /usr/local/bin/entrypoint-router.sh
@@ -140,9 +130,9 @@ LABEL org.opencontainers.image.title="Aspia Relay v3" \
       org.opencontainers.image.documentation="https://aspia.org/docs/"
 
 # hadolint ignore=DL3008
-RUN --mount=type=bind,from=fetcher,source=/downloads,target=/tmp/downloads \
-    apt-get update && apt-get install -y --no-install-recommends /tmp/downloads/aspia-relay.deb \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* \
+RUN --mount=type=bind,from=fetcher,source=/downloads,target=/mnt/downloads \
+    apt-get update && apt-get install -y --no-install-recommends /mnt/downloads/aspia-relay.deb \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && command -v aspia_relay
 
 COPY --chmod=0755 scripts/entrypoint-relay.sh /usr/local/bin/entrypoint-relay.sh
