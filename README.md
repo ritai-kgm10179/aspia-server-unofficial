@@ -1,5 +1,10 @@
 # Aspia v3 Server Docker (Router + Relay) — Arcane Ready
 
+[![Build, Test, Scan & Publish](https://github.com/ritai-kgm10179/aspia-server-unofficial/actions/workflows/build-and-publish.yml/badge.svg)](https://github.com/ritai-kgm10179/aspia-server-unofficial/actions/workflows/build-and-publish.yml)
+[![Auto-Update](https://github.com/ritai-kgm10179/aspia-server-unofficial/actions/workflows/auto-update.yml/badge.svg)](https://github.com/ritai-kgm10179/aspia-server-unofficial/actions/workflows/auto-update.yml)
+[![Latest Release](https://img.shields.io/github/v/release/ritai-kgm10179/aspia-server-unofficial)](https://github.com/ritai-kgm10179/aspia-server-unofficial/releases/latest)
+[![License](https://img.shields.io/github/license/ritai-kgm10179/aspia-server-unofficial)](LICENSE)
+
 專為 **GitHub Container Registry (GHCR)** 與 **[Arcane](https://getarcane.app/)** 管理的非官方 **Aspia v3+** Docker 映像檔與 Compose 堆疊（Stack），採用最新最小化穩定版 **Debian (`debian:stable-slim`)** 建置，並內建**每日自動檢查版本與安全更新並重新發布映像檔**的 GitHub Actions 工作流程。
 
 > [!WARNING]
@@ -282,7 +287,8 @@ docker compose logs -f aspia-router
 - **雙重觸發條件**：
   1. 官網穩定版通道 `https://aspia.org/updates/stable.json`（含對應版本 Manifest 的官方 `.deb` 下載路徑與 `sha256` 校驗碼，並以 `dchapyshev/aspia` GitHub Releases API 作為備援）發布新的 `3.x` 以上正式版（含未來大版本，排除 `draft` 與 `prerelease`）。
   2. `debian:stable-slim` (`linux/amd64`) 基底映像檔有大版本或安全更新（Manifest Digest 變動）。
-- **自動化流程**：偵測到更新時，先建立或更新 `chore/auto-update` 分支（同步修改 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json)）並自動開立 Pull Request（支援嘗試啟用 squash Auto-merge）→ 通過 `main` 分支 Ruleset 的 3 項必要檢查（Hadolint / ShellCheck、Release 資產解析、Compose 端對端煙霧測試與 Trivy 掃描）並合併至 `main` 後 → [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 自動建置並推送含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR，且建立對應的 GitHub Release；若手動觸發 `force_rebuild` 且無檔案異動，則直接重新建置與發布。
+- **自動化流程**：偵測到更新時，先建立或更新 `chore/auto-update` 分支（同步修改 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json)）並自動開立 Pull Request（支援嘗試啟用 squash Auto-merge）→ 通過 `main` 分支 Ruleset 的 3 項必要檢查（Hadolint / ShellCheck、Release 資產解析、Compose 全新啟動與原地升級相容性煙霧測試、Trivy 掃描）並合併至 `main` 後 → [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 自動建置並推送含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR，且建立對應的 GitHub Release；若手動觸發 `force_rebuild` 且無檔案異動，則直接重新建置與發布。
+- **Dependabot 自動合併**：每週檢查 GitHub Actions SHA 更新所建立的群組 PR，會由 [`.github/workflows/dependabot-auto-merge.yml`](.github/workflows/dependabot-auto-merge.yml) 自動啟用 squash Auto-merge（仍須通過上述 3 項必要檢查才會合併）。
 - **全自動 PR 檢查權杖（選用）**：因 GitHub 預設會阻擋 `GITHUB_TOKEN` 開立的 PR 自動觸發 `pull_request` 工作流程，若希望每日自動 PR 不需手動「關閉後重開」即可自動執行檢查並啟用 Auto-merge，可於 **Settings → Secrets and variables → Actions** 建立 Fine-grained PAT Secret `AUTO_UPDATE_TOKEN`（僅需本儲存庫 `Contents: Read and write` 與 `Pull requests: Read and write` 權限）。
 - **搭配 Arcane Auto-Updater**：預設 Compose 追蹤 `:latest` 標籤並保留 `com.getarcaneapp.arcane.updater=true`，Arcane 就會在冷卻期後自動下載（pull）並重建容器（若不希望自動跨大版本，可將 `.env` 的 `ASPIA_IMAGE_TAG` 改為指定大版本如 `3`）。
 

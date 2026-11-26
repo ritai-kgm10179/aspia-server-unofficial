@@ -1,0 +1,30 @@
+name: Dependabot Auto-Merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: Enable Auto-Merge for Dependabot PR
+    runs-on: ubuntu-latest
+    # 嚴格限定僅針對本儲存庫的 dependabot[bot] PR 啟用自動合併，且不檢出任何 PR 程式碼
+    if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_UPDATE_TOKEN || github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          if gh pr merge --auto --squash "$PR_URL" 2>/tmp/automerge.err; then
+            echo "Enabled squash auto-merge for ${PR_URL}."
+          else
+            echo "::notice::Auto-merge was skipped: $(tr '\n' ' ' < /tmp/automerge.err)"
+          fi
