@@ -93,38 +93,45 @@
 
 如果你原本在 Windows 上已執行 Aspia v3 Router／Relay，想把帳號、電腦 ID 清單與金鑰直接搬移到這個 Docker 專案：
 
-1. **先停止 Windows 上的服務**（避免 SQLite 資料庫處於寫入或鎖定狀態）：
+1. **先停止 Windows 上的服務**（避免 SQLite 資料庫處於寫入或鎖定狀態，並讓 `*-wal`／`*-shm` 暫存檔寫回主資料庫）：
    ```powershell
    # 在 Windows 系統管理員 PowerShell 執行
    Stop-Service aspia-router, aspia-relay
    ```
 2. **取得 Windows 原有檔案**（預設位於 `C:\ProgramData\aspia\`）：
-   - Router 資料庫：`router.db3`、`access_log.db3`、`email_queue.db3`
-   - Router 設定與金鑰：`router.conf`、`host.pub`、`relay.pub`
+   - Router 資料庫：`router.db3`、`access_log.db3`、`email_queue.db3`，以及（Aspia 3.5.2+ 新增的）`sync/` 資料夾（Client 雲端同步資料庫）
+   - Router 設定與金鑰：`router.conf`、`host.pub`、`relay.pub`（若檔案存在）
    - Relay 設定：`relay.conf`
-   > ⚠️ 若原本為舊版 Aspia v2（`router.json` / `relay.json`），無法直接相容，請先升級至 v3。
+   > ⚠️ **注意事項**：
+   > - 若原本為舊版 Aspia v2（`router.json` / `relay.json`），無法直接相容，請先升級至 v3。
+   > - 請**不要**複製舊版 `2.x` 遺留的 `router.pub`、`host.ini`、`host_storage.ini`、`secure/`、`*.bak` 或 `logs/`（若原本沒有獨立 `relay.pub` 檔，可由 `relay.conf` 的 `[router] public_key` 自行匯出，或直接複製 `relay.conf` 即可）。
 3. **修改 `compose.yaml` 為本地目錄掛載（Bind Mount）或複製進具名磁碟區**：
-   以下示範使用本地資料夾 `./data/` 掛載：
+   以下示範在 `compose.yaml` 旁邊建立 `./data/` 資料夾掛載：
    ```bash
    # 在 Linux 主機建立目錄並放入從 Windows 複製過來的檔案
-   mkdir -p ./data/router-config ./data/router-data ./data/relay-config
+   mkdir -p ./data/router-config ./data/router-data/sync ./data/relay-config
 
-   # 放入資料庫檔案
+   # 放入資料庫檔案與 sync 資料夾
    cp router.db3 access_log.db3 email_queue.db3 ./data/router-data/
+   cp -r sync/* ./data/router-data/sync/ 2>/dev/null || true
 
-   # 放入設定檔與公開金鑰
-   cp router.conf host.pub relay.pub ./data/router-config/
+   # 放入設定檔與公開金鑰（勿放入舊版 router.pub）
+   cp router.conf ./data/router-config/
+   cp host.pub relay.pub ./data/router-config/ 2>/dev/null || true
    cp relay.conf ./data/relay-config/
 
-   # 確認 router.conf 與 relay.conf 的 listen_interface 為空（避免綁定 Windows 舊 IP 導致啟動失敗）
+   # 移除 Windows CRLF 換行並清空 listen_interface（避免綁定 Windows 舊 IP 導致啟動失敗）
+   sed -i 's/\r$//' ./data/router-config/router.conf ./data/relay-config/relay.conf
+   sed -i 's/\r$//' ./data/router-config/*.pub 2>/dev/null || true
    sed -i 's/^listen_interface=.*/listen_interface=/' ./data/router-config/router.conf ./data/relay-config/relay.conf
 
    # 設定容器非特權使用者 (UID/GID 1000) 權限
    chown -R 1000:1000 ./data
+   chmod 700 ./data/router-config ./data/router-data ./data/relay-config
    chmod 600 ./data/router-config/router.conf ./data/relay-config/relay.conf
    ```
 4. 在 `compose.yaml` 將對應磁碟區改為 Bind Mount（`./data/...`）後啟動：
-   - 因 `ASPIA_MANAGE_CONFIG=true`（預設），啟動腳本會自動將 `relay.conf` 內的 `[router] address` 從 `127.0.0.1` 更新為 `aspia-router`，並保留所有原有帳號與金鑰。
+   - 因 `ASPIA_MANAGE_CONFIG=true`（預設），啟動腳本會自動將 `relay.conf` 內的 `[router] address` 從 `127.0.0.1` 更新為 `aspia-router`，並保留 `[smtp]` 與所有原有帳號與金鑰。
 
 ---
 
