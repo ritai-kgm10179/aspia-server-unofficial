@@ -28,28 +28,36 @@ if [ ! -f "$ASPIA_RELAY_CONFIG_FILE" ]; then
   chmod 600 "$ASPIA_RELAY_CONFIG_FILE" 2>/dev/null || true
 fi
 
-# 優先讀取環境變數指定的公鑰，若未指定則等待共用磁碟區內的 relay.pub
+# 優先讀取環境變數指定的公鑰；否則依序檢查共用磁碟區 relay.pub、既有 relay.conf 公鑰，或等待 Router 發布
 router_public_key="${ASPIA_ROUTER_PUBLIC_KEY:-}"
+existing_router_key="$(ini_get "$ASPIA_RELAY_CONFIG_FILE" router public_key)"
 if [ -z "$router_public_key" ]; then
   key_file="${ASPIA_ROUTER_PUBLIC_KEY_FILE:-/run/aspia-keys/relay.pub}"
   fallback_key_file="/run/aspia-keys/router.pub"
-  waited=0
 
-  while [ "$waited" -lt "$KEY_WAIT_SECONDS" ]; do
-    if [ -s "$key_file" ]; then
-      router_public_key="$(tr -d ' \t\r\n' < "$key_file")"
-      break
-    fi
-    if [ -s "$fallback_key_file" ]; then
-      router_public_key="$(tr -d ' \t\r\n' < "$fallback_key_file")"
-      break
-    fi
-    sleep 1
-    waited=$((waited + 1))
-  done
-
-  if [ -n "$router_public_key" ]; then
+  if [ -s "$key_file" ]; then
+    router_public_key="$(tr -d ' \t\r\n' < "$key_file")"
     log_info "Loaded Router relay public key automatically from shared keys volume."
+  elif [ -n "$existing_router_key" ]; then
+    log_info "Using existing [router] public_key from ${ASPIA_RELAY_CONFIG_FILE}."
+  else
+    waited=0
+    while [ "$waited" -lt "$KEY_WAIT_SECONDS" ]; do
+      if [ -s "$key_file" ]; then
+        router_public_key="$(tr -d ' \t\r\n' < "$key_file")"
+        break
+      fi
+      if [ -s "$fallback_key_file" ]; then
+        router_public_key="$(tr -d ' \t\r\n' < "$fallback_key_file")"
+        break
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+
+    if [ -n "$router_public_key" ]; then
+      log_info "Loaded Router relay public key automatically from shared keys volume."
+    fi
   fi
 fi
 
