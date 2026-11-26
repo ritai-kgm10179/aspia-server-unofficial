@@ -234,7 +234,7 @@ jobs:
           docker logs aspia-relay 2>&1
 
       - name: Scan Router image with Trivy (table)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: aspia-local/router:test
           format: table
@@ -242,7 +242,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan Relay image with Trivy (table)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: aspia-local/relay:test
           format: table
@@ -251,7 +251,7 @@ jobs:
 
       - name: Generate Trivy SARIF for Router
         if: ${{ github.event_name != 'pull_request' }}
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: aspia-local/router:test
           format: sarif
@@ -267,7 +267,7 @@ jobs:
 
       - name: Generate Trivy SARIF for Relay
         if: ${{ github.event_name != 'pull_request' }}
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: aspia-local/relay:test
           format: sarif
