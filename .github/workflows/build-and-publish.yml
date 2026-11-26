@@ -339,3 +339,39 @@ jobs:
             ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  release:
+    name: Create GitHub Release
+    needs: [resolve, publish]
+    if: ${{ needs.resolve.outputs.should_push == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Create GitHub Release for new version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESOLVED_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          repo_version="$(tr -d ' \t\r\n' < VERSION)"
+          base_digest="$(tr -d ' \t\r\n' < .base-digest)"
+          if [ "$RESOLVED_VERSION" != "$repo_version" ]; then
+            echo "::notice::Built version (${RESOLVED_VERSION}) differs from VERSION (${repo_version}) on main; skipping GitHub Release creation."
+            exit 0
+          fi
+
+          tag="v${RESOLVED_VERSION}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            repo_lower="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "Aspia v3 Docker Server ${tag}" \
+              --notes "$(printf 'Automated release tracking upstream [dchapyshev/aspia %s](https://github.com/dchapyshev/aspia/releases/tag/%s) on `debian:13-slim` (`%s`).\n\n### Container Images\n- `ghcr.io/%s/router:%s`\n- `ghcr.io/%s/relay:%s`' "$tag" "$tag" "$base_digest" "$repo_lower" "$RESOLVED_VERSION" "$repo_lower" "$RESOLVED_VERSION")"
+          else
+            echo "GitHub Release ${tag} already exists; skipping."
+          fi

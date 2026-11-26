@@ -29,7 +29,9 @@ jobs:
     name: Check Upstream Aspia & Debian 13-slim Updates
     runs-on: ubuntu-latest
     outputs:
+      current_version: ${{ steps.check.outputs.current_version }}
       latest_version: ${{ steps.check.outputs.latest_version }}
+      current_digest: ${{ steps.check.outputs.current_digest }}
       base_digest: ${{ steps.check.outputs.base_digest }}
       version_changed: ${{ steps.check.outputs.version_changed }}
       base_changed: ${{ steps.check.outputs.base_changed }}
@@ -107,7 +109,9 @@ jobs:
           fi
 
           {
+            echo "current_version=${current_version}"
             echo "latest_version=${latest_version}"
+            echo "current_digest=${current_digest}"
             echo "base_digest=${base_digest}"
             echo "version_changed=${version_changed}"
             echo "base_changed=${base_changed}"
@@ -124,26 +128,37 @@ jobs:
             echo "Force rebuild: \`${FORCE_REBUILD}\` -> **Needs update: \`${needs_update}\`**"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  commit-update:
-    name: Update Version Files & Create Release
+  create-update-pr:
+    name: Create or Update Auto-Update PR
     needs: check-updates
-    if: ${{ needs.check-updates.outputs.needs_update == 'true' && (needs.check-updates.outputs.version_changed == 'true' || needs.check-updates.outputs.base_changed == 'true') }}
+    if: ${{ needs.check-updates.outputs.version_changed == 'true' || needs.check-updates.outputs.base_changed == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          token: ${{ secrets.AUTO_UPDATE_TOKEN || github.token }}
 
-      - name: Update VERSION, Dockerfile, and .base-digest
+      - name: Create or update auto-update branch and PR
         env:
+          GH_TOKEN: ${{ secrets.AUTO_UPDATE_TOKEN || github.token }}
+          HAS_CUSTOM_TOKEN: ${{ secrets.AUTO_UPDATE_TOKEN != '' }}
+          CURRENT_VERSION: ${{ needs.check-updates.outputs.current_version }}
           LATEST_VERSION: ${{ needs.check-updates.outputs.latest_version }}
+          CURRENT_DIGEST: ${{ needs.check-updates.outputs.current_digest }}
           BASE_DIGEST: ${{ needs.check-updates.outputs.base_digest }}
           VERSION_CHANGED: ${{ needs.check-updates.outputs.version_changed }}
+          BASE_CHANGED: ${{ needs.check-updates.outputs.base_changed }}
         run: |
           set -euo pipefail
+
+          branch="chore/auto-update"
+          git fetch origin "$branch" 2>/dev/null || true
+          git checkout -B "$branch"
 
           printf '%s\n' "$LATEST_VERSION" > VERSION
           printf '%s\n' "$BASE_DIGEST" > .base-digest
@@ -153,49 +168,85 @@ jobs:
             mv /tmp/registry.json arcane/registry.json
           fi
 
-          if ! git diff --quiet; then
+          if [ "$VERSION_CHANGED" = "true" ] && [ "$BASE_CHANGED" = "true" ]; then
+            commit_msg="chore: bump Aspia to v${LATEST_VERSION} and update debian:13-slim"
+            pr_title="chore: 更新 Aspia v${LATEST_VERSION} 與 debian:13-slim 基底映像檔"
+          elif [ "$VERSION_CHANGED" = "true" ]; then
+            commit_msg="chore: bump Aspia to v${LATEST_VERSION}"
+            pr_title="chore: 更新 Aspia 至 v${LATEST_VERSION}"
+          else
+            commit_msg="chore: rebuild for debian:13-slim security update"
+            pr_title="chore: 更新 debian:13-slim 基底映像檔以修補安全性更新"
+          fi
+
+          remote_exists="false"
+          if git rev-parse -q --verify "refs/remotes/origin/${branch}" >/dev/null; then
+            remote_exists="true"
+          fi
+
+          if [ "$remote_exists" = "true" ] \
+            && git merge-base --is-ancestor HEAD "refs/remotes/origin/${branch}" \
+            && git diff --quiet "refs/remotes/origin/${branch}" -- VERSION .base-digest Dockerfile arcane/registry.json; then
+            push_status="skipped (branch already up to date)"
+          elif ! git diff --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            if [ "$VERSION_CHANGED" = "true" ]; then
-              commit_msg="chore: bump Aspia to v${LATEST_VERSION}"
-            else
-              commit_msg="chore: rebuild for debian:13-slim security update"
-            fi
-
             git add VERSION .base-digest Dockerfile arcane/registry.json
             git commit -m "$commit_msg"
-            git push origin HEAD:main
+            if [ "$remote_exists" = "true" ]; then
+              git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+            else
+              git push origin "HEAD:refs/heads/${branch}"
+            fi
+            push_status="pushed"
+          else
+            echo "No tracked file differences detected; exiting."
+            exit 0
           fi
 
-      - name: Tag and create GitHub Release on Aspia version bump
-        if: ${{ needs.check-updates.outputs.version_changed == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LATEST_VERSION: ${{ needs.check-updates.outputs.latest_version }}
-          BASE_DIGEST: ${{ needs.check-updates.outputs.base_digest }}
-        run: |
-          set -euo pipefail
+          {
+            echo "## 自動化版本更新追蹤"
+            echo ""
+            echo "| 項目 | 目前版本／Digest | 上游最新 | 是否變動 |"
+            echo "| --- | --- | --- | --- |"
+            echo "| Aspia v3 | \`${CURRENT_VERSION}\` | \`${LATEST_VERSION}\` | \`${VERSION_CHANGED}\` |"
+            echo "| debian:13-slim (amd64) | \`${CURRENT_DIGEST}\` | \`${BASE_DIGEST}\` | \`${BASE_CHANGED}\` |"
+            echo ""
+            echo "- 所有必要檢查（\`Lint Dockerfile & Shell Scripts\`、\`Resolve Aspia v3 Release Assets\`、\`Build, Compose Smoke Test & Trivy Scan\`）通過並合併至 \`main\` 後，\`Build, Test, Scan & Publish\` 將自動建置、弱點掃描、推送新版映像檔至 GHCR，並於版號更新時建立 GitHub Release。"
+            if [ "$HAS_CUSTOM_TOKEN" != "true" ]; then
+              echo "- ℹ️ **提示**：目前使用預設 \`GITHUB_TOKEN\` 建立 PR；依 GitHub 安全機制，預設權杖開立的 PR 不會自動觸發 \`pull_request\` 檢查工作流程。請於 PR 頁面先關閉再重新開啟一次以觸發這 3 項必要檢查，或於 **Settings → Secrets and variables → Actions** 新增 \`AUTO_UPDATE_TOKEN\` Secret 以實現全自動檢查與 Auto-merge。"
+            fi
+          } > /tmp/pr-body.md
 
-          tag="v${LATEST_VERSION}"
-          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            git tag -a "$tag" -m "Release ${tag}"
-            git push origin "$tag"
+          existing_pr="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" --title "$pr_title" --body-file /tmp/pr-body.md
+            pr_number="$existing_pr"
+          else
+            pr_url="$(gh pr create --base main --head "$branch" --title "$pr_title" --body-file /tmp/pr-body.md)"
+            pr_number="$(printf '%s' "$pr_url" | sed -E 's|.*/pull/([0-9]+).*|\1|')"
           fi
 
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            repo_lower="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-            gh release create "$tag" \
-              --title "Aspia v3 Docker Server ${tag}" \
-              --notes "$(printf 'Automated release tracking upstream [dchapyshev/aspia %s](https://github.com/dchapyshev/aspia/releases/tag/%s) on \`debian:13-slim\` (\`%s\`).\n\n### Container Images\n- \`ghcr.io/%s/router:%s\`\n- \`ghcr.io/%s/relay:%s\`' "$tag" "$tag" "$BASE_DIGEST" "$repo_lower" "$LATEST_VERSION" "$repo_lower" "$LATEST_VERSION")"
+          if gh pr merge --auto --squash "$pr_number" 2>/tmp/automerge.err; then
+            automerge_status="enabled (squash)"
+          else
+            automerge_status="skipped ($(tr '\n' ' ' < /tmp/automerge.err))"
+            echo "::notice::Auto-merge was skipped: ${automerge_status}"
           fi
+
+          {
+            echo "### Auto-Update PR Result"
+            echo "- Branch: \`${branch}\` (${push_status})"
+            echo "- Pull Request: #${pr_number}"
+            echo "- Auto-merge: ${automerge_status}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build-and-publish:
-    name: Build & Publish Updated Images
-    needs: [check-updates, commit-update]
-    if: ${{ always() && needs.check-updates.outputs.needs_update == 'true' && (needs.commit-update.result == 'success' || needs.commit-update.result == 'skipped') }}
+    name: Force Rebuild & Publish Images
+    needs: [check-updates]
+    if: ${{ inputs.force_rebuild == true && needs.check-updates.outputs.version_changed == 'false' && needs.check-updates.outputs.base_changed == 'false' }}
     permissions:
-      contents: read
+      contents: write
       packages: write
       security-events: write
       attestations: write
