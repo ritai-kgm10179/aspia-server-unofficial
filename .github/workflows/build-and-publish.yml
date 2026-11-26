@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       aspia_version:
-        description: "Aspia v3 version to build (defaults to VERSION file)"
+        description: "Aspia version to build (defaults to VERSION file)"
         type: string
         required: false
         default: ""
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       aspia_version:
-        description: "Aspia v3 version to build (defaults to VERSION file)"
+        description: "Aspia version to build (defaults to VERSION file)"
         type: string
         required: false
         default: ""
@@ -68,6 +68,8 @@ jobs:
       minor: ${{ steps.meta.outputs.minor }}
       router_deb_url: ${{ steps.meta.outputs.router_deb_url }}
       relay_deb_url: ${{ steps.meta.outputs.relay_deb_url }}
+      router_deb_sha256: ${{ steps.meta.outputs.router_deb_sha256 }}
+      relay_deb_sha256: ${{ steps.meta.outputs.relay_deb_sha256 }}
       should_push: ${{ steps.meta.outputs.should_push }}
     steps:
       - name: Checkout repository
@@ -87,36 +89,74 @@ jobs:
           if [ -z "$req_ver" ]; then
             req_ver="$(tr -d ' \t\r\n' < VERSION)"
           fi
+          req_ver="${req_ver#v}"
 
-          curl -fsSL \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
-            -o /tmp/releases.json
+          version=""
+          router_deb_url=""
+          relay_deb_url=""
+          router_deb_sha256=""
+          relay_deb_sha256=""
+          source=""
 
-          if [ "$req_ver" = "latest" ]; then
-            jq -e '
-              [ .[]
-                | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?3\\.")))
-                | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
-                | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
-              ][0]
-            ' /tmp/releases.json > /tmp/release.json
-          else
-            jq -e --arg ver "$req_ver" '
-              [ .[]
-                | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
-              ][0]
-            ' /tmp/releases.json > /tmp/release.json
+          resolved_ver="$req_ver"
+          if [ "$req_ver" = "latest" ] && curl -fsSL --retry 2 --retry-delay 2 "https://aspia.org/updates/stable.json" -o /tmp/stable.json 2>/dev/null; then
+            candidate="$(jq -r '.targets.latest // empty' /tmp/stable.json)"
+            candidate="${candidate#v}"
+            if printf '%s' "$candidate" | grep -Eq '^([3-9]|[1-9][0-9]+)\.'; then
+              resolved_ver="$candidate"
+            fi
           fi
 
-          tag_name="$(jq -er '.tag_name' /tmp/release.json)"
-          version="${tag_name#v}"
+          if [ "$resolved_ver" != "latest" ] && curl -fsSL --retry 2 --retry-delay 2 "https://aspia.org/updates/versions/${resolved_ver}.json" -o /tmp/manifest.json 2>/dev/null; then
+            base_path="$(jq -r '.path // empty' /tmp/manifest.json)"
+            r_file="$(jq -r '[.packages.router.linux.x86_64[]? | select(.format == "deb")][0].file // empty' /tmp/manifest.json)"
+            r_sha="$(jq -r '[.packages.router.linux.x86_64[]? | select(.format == "deb")][0].sha256 // empty' /tmp/manifest.json)"
+            l_file="$(jq -r '[.packages.relay.linux.x86_64[]? | select(.format == "deb")][0].file // empty' /tmp/manifest.json)"
+            l_sha="$(jq -r '[.packages.relay.linux.x86_64[]? | select(.format == "deb")][0].sha256 // empty' /tmp/manifest.json)"
+            if [ -n "$base_path" ] && [ -n "$r_file" ] && [ -n "$l_file" ]; then
+              version="$resolved_ver"
+              router_deb_url="${base_path}/${r_file}"
+              relay_deb_url="${base_path}/${l_file}"
+              router_deb_sha256="$r_sha"
+              relay_deb_sha256="$l_sha"
+              source="aspia.org"
+            fi
+          fi
+
+          if [ -z "$router_deb_url" ] || [ -z "$relay_deb_url" ]; then
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/dchapyshev/aspia/releases?per_page=30" \
+              -o /tmp/releases.json
+
+            if [ "$req_ver" = "latest" ]; then
+              jq -e '
+                [ .[]
+                  | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v?([3-9]|[1-9][0-9]+)\\.")))
+                  | select(any(.assets[]; .name | test("^aspia-router.*(x86_64|amd64).*\\.deb$")))
+                  | select(any(.assets[]; .name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$")))
+                ][0]
+              ' /tmp/releases.json > /tmp/release.json
+            else
+              jq -e --arg ver "$req_ver" '
+                [ .[]
+                  | select(.tag_name == ("v" + $ver) or .tag_name == $ver)
+                ][0]
+              ' /tmp/releases.json > /tmp/release.json
+            fi
+
+            tag_name="$(jq -er '.tag_name' /tmp/release.json)"
+            version="${tag_name#v}"
+            router_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-router.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
+            relay_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
+            router_deb_sha256=""
+            relay_deb_sha256=""
+            source="github-releases"
+          fi
+
           major="${version%%.*}"
           minor="${version%.*}"
-
-          router_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-router.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
-          relay_deb_url="$(jq -er '[.assets[] | select(.name | test("^aspia-relay.*(x86_64|amd64).*\\.deb$"))][0].browser_download_url' /tmp/release.json)"
 
           if [ "$EVENT_NAME" != "pull_request" ] && [ "$INPUT_PUSH" != "false" ]; then
             should_push="true"
@@ -130,10 +170,12 @@ jobs:
             echo "minor=${minor}"
             echo "router_deb_url=${router_deb_url}"
             echo "relay_deb_url=${relay_deb_url}"
+            echo "router_deb_sha256=${router_deb_sha256}"
+            echo "relay_deb_sha256=${relay_deb_sha256}"
             echo "should_push=${should_push}"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Resolved Aspia v${version} (router: ${router_deb_url}, relay: ${relay_deb_url}, push: ${should_push})"
+          echo "Resolved Aspia v${version} via ${source} (router: ${router_deb_url}, relay: ${relay_deb_url}, push: ${should_push})"
 
   build-test-scan:
     name: Build, Compose Smoke Test & Trivy Scan
@@ -161,6 +203,8 @@ jobs:
             ASPIA_VERSION=${{ needs.resolve.outputs.version }}
             ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
             ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+            ASPIA_ROUTER_DEB_SHA256=${{ needs.resolve.outputs.router_deb_sha256 }}
+            ASPIA_RELAY_DEB_SHA256=${{ needs.resolve.outputs.relay_deb_sha256 }}
           cache-from: type=gha,scope=router
           cache-to: type=gha,mode=max,scope=router
 
@@ -176,6 +220,8 @@ jobs:
             ASPIA_VERSION=${{ needs.resolve.outputs.version }}
             ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
             ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+            ASPIA_ROUTER_DEB_SHA256=${{ needs.resolve.outputs.router_deb_sha256 }}
+            ASPIA_RELAY_DEB_SHA256=${{ needs.resolve.outputs.relay_deb_sha256 }}
           cache-from: type=gha,scope=relay
           cache-to: type=gha,mode=max,scope=relay
 
@@ -337,6 +383,8 @@ jobs:
             ASPIA_VERSION=${{ needs.resolve.outputs.version }}
             ASPIA_ROUTER_DEB_URL=${{ needs.resolve.outputs.router_deb_url }}
             ASPIA_RELAY_DEB_URL=${{ needs.resolve.outputs.relay_deb_url }}
+            ASPIA_ROUTER_DEB_SHA256=${{ needs.resolve.outputs.router_deb_sha256 }}
+            ASPIA_RELAY_DEB_SHA256=${{ needs.resolve.outputs.relay_deb_sha256 }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
@@ -370,8 +418,8 @@ jobs:
             repo_lower="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
             gh release create "$tag" \
               --target "$GITHUB_SHA" \
-              --title "Aspia v3 Docker Server ${tag}" \
-              --notes "$(printf 'Automated release tracking upstream [dchapyshev/aspia %s](https://github.com/dchapyshev/aspia/releases/tag/%s) on `debian:13-slim` (`%s`).\n\n### Container Images\n- `ghcr.io/%s/router:%s`\n- `ghcr.io/%s/relay:%s`' "$tag" "$tag" "$base_digest" "$repo_lower" "$RESOLVED_VERSION" "$repo_lower" "$RESOLVED_VERSION")"
+              --title "Aspia Docker Server ${tag}" \
+              --notes "$(printf 'Automated release tracking upstream [dchapyshev/aspia %s](https://github.com/dchapyshev/aspia/releases/tag/%s) on `debian:stable-slim` (`%s`).\n\n### Container Images\n- `ghcr.io/%s/router:%s`\n- `ghcr.io/%s/relay:%s`' "$tag" "$tag" "$base_digest" "$repo_lower" "$RESOLVED_VERSION" "$repo_lower" "$RESOLVED_VERSION")"
           else
             echo "GitHub Release ${tag} already exists; skipping."
           fi

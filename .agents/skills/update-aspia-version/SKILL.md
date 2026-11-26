@@ -10,11 +10,11 @@ description: >-
 ## 執行步驟
 
 1. **確認上游版本與 `.deb` 資產**
-   - 查詢 `https://api.github.com/repos/dchapyshev/aspia/releases`（或透過 GitHub CLI／Web 搜尋），確認目標 `3.x` 非草稿、非預先發布版本同時具備 `aspia-router-*-(x86_64|amd64).deb` 與 `aspia-relay-*-(x86_64|amd64).deb`。
-   - 確認上游發布說明是否有新增或異動 `router.conf`、`relay.conf` 鍵值或預設連接埠。
+   - 優先查詢官網穩定版通道 `https://aspia.org/updates/stable.json` 與 `https://aspia.org/updates/versions/<版本>.json`（取得 `.deb` 下載網址與官方 `sha256` 校驗碼）；若官網尚未收錄或需查詢備援來源，再查詢 `https://api.github.com/repos/dchapyshev/aspia/releases`，確認目標 `3.x` 以上（含未來大版本）非草稿、非預先發布版本同時具備 `aspia-router-*-(x86_64|amd64).deb` 與 `aspia-relay-*-(x86_64|amd64).deb`。
+   - 確認上游發布說明（`https://aspia.org/changelog`）是否有新增或異動 `router.conf`、`relay.conf` 鍵值或預設連接埠。
 
 2. **同步版號檔案**
-   - 更新 [VERSION](../../../VERSION) 為目標純版號（不含 `v` 前綴，例如 `3.4.3`，結尾單一 LF 換行）。
+   - 更新 [VERSION](../../../VERSION) 為目標純版號（不含 `v` 前綴，例如 `3.5.2`，結尾單一 LF 換行）。
    - 同步更新 [Dockerfile](../../../Dockerfile) 頂端的 `ARG ASPIA_VERSION=<版本>`。
    - 若上游變更設定格式或預設連接埠，同步調整 `scripts/entrypoint-router.sh`、`scripts/entrypoint-relay.sh`、`compose.yaml`、`.env.example` 與 `README.md`。
 
