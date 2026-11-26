@@ -38,10 +38,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  security-events: write
-  attestations: write
-  id-token: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -53,10 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Lint Dockerfile with Hadolint
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: Dockerfile
 
@@ -75,7 +71,7 @@ jobs:
       should_push: ${{ steps.meta.outputs.should_push }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Aspia release metadata and .deb URLs
         id: meta
@@ -143,15 +139,18 @@ jobs:
     name: Build, Compose Smoke Test & Trivy Scan
     needs: [lint, resolve]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build local Router image for testing
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: router
@@ -166,7 +165,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=router
 
       - name: Build local Relay image for testing
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: relay
@@ -234,7 +233,7 @@ jobs:
           docker logs aspia-relay 2>&1
 
       - name: Scan Router image with Trivy (table)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: aspia-local/router:test
           format: table
@@ -242,7 +241,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan Relay image with Trivy (table)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: aspia-local/relay:test
           format: table
@@ -251,32 +250,34 @@ jobs:
 
       - name: Generate Trivy SARIF for Router
         if: ${{ github.event_name != 'pull_request' }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: aspia-local/router:test
           format: sarif
           output: trivy-router.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
 
       - name: Upload Router Trivy SARIF
         if: ${{ github.event_name != 'pull_request' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4
         with:
           sarif_file: trivy-router.sarif
           category: trivy-router
 
       - name: Generate Trivy SARIF for Relay
         if: ${{ github.event_name != 'pull_request' }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: aspia-local/relay:test
           format: sarif
           output: trivy-relay.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
 
       - name: Upload Relay Trivy SARIF
         if: ${{ github.event_name != 'pull_request' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4
         with:
           sarif_file: trivy-relay.sarif
           category: trivy-relay
@@ -286,19 +287,24 @@ jobs:
     needs: [resolve, build-test-scan]
     if: ${{ needs.resolve.outputs.should_push == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
         target: [router, relay]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -306,7 +312,7 @@ jobs:
 
       - name: Generate Docker metadata and tags
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}/${{ matrix.target }}
           tags: |
@@ -317,7 +323,7 @@ jobs:
             type=sha,prefix=sha-
 
       - name: Build and push ${{ matrix.target }} image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: ${{ matrix.target }}

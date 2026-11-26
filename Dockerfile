@@ -71,8 +71,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ASPIA_LOG_TO_STDOUT=1 \
     ASPIA_LOG_TO_FILE=0
 
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# hadolint ignore=DL3005,DL3008
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
       ca-certificates \
       tzdata \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
