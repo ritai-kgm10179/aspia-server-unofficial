@@ -21,14 +21,16 @@
   - 使用具名磁碟區（Volume），方便透過 Arcane Volume Backups 備份設定與資料庫。
   - 無額外相依套件、零日誌干擾的被動式 `HEALTHCHECK`（檢查 PID 1 與 `/proc/net/tcp` 監聽狀態）。
 - **全自動版本追蹤與映像檔更新**：
-  - [`.github/workflows/auto-update.yml`](.github/workflows/auto-update.yml) 每日定時檢查 `dchapyshev/aspia` 最新穩定版 `3.x` 與 `debian:13-slim` 基底映像檔 Digest，有更新即自動提交版號、建立 Release 並發布新版映像檔至 GHCR。
+  - [`.github/workflows/auto-update.yml`](.github/workflows/auto-update.yml) 每日定時檢查 `dchapyshev/aspia` 最新穩定版 `3.x` 與 `debian:13-slim` 基底映像檔 Digest，有更新即自動建立或更新 `chore/auto-update` Pull Request（相容 `main` 分支 Ruleset 保護規則）；待必要檢查全數通過並合併至 `main` 後，隨即自動建置新版映像檔推送至 GHCR 並建立 GitHub Release。
 
 ---
 
 ## 🚀 快速開始（GitHub 設定）
 
-1. 若為自行 Fork 本專案，請先確認 GitHub Actions 權限已開啟：
-   - 前往 **Settings → Actions → General → Workflow permissions**，選擇 **Read and write permissions**。
+1. 若為自行 Fork 本專案，請先確認 GitHub Actions 與 PR 權限已開啟：
+   - 前往 **Settings → Actions → General → Workflow permissions**，選擇 **Read and write permissions**，並勾選 **Allow GitHub Actions to create and approve pull requests**。
+   - （選用）前往 **Settings → General → Pull Requests**，勾選 **Allow auto-merge**，即可讓自動更新 PR 於檢查通過後自動合併。
+   - （選用）若啟用了要求 PR 必要檢查的 Branch Ruleset，可於 **Settings → Secrets and variables → Actions** 新增具備本儲存庫 `Contents: Read and write` 與 `Pull requests: Read and write` 權限的 Fine-grained PAT `AUTO_UPDATE_TOKEN`，讓機器人建立的 PR 能全自動觸發檢查與 Auto-merge。
 2. 執行一次 **Actions → Auto-Update Aspia & Base Image → Run workflow**（可勾選 `force_rebuild`）即可自動建置並推送：
    - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/router:3`
    - `ghcr.io/ritai-kgm10179/aspia-server-unofficial/relay:3`
@@ -280,7 +282,8 @@ docker compose logs -f aspia-router
 - **雙重觸發條件**：
   1. 上游 `dchapyshev/aspia` 發布新的 `3.x` 穩定版（含 `x86_64`/`amd64` `.deb` 套件）。
   2. `debian:13-slim` (`linux/amd64`) 基底映像檔有安全更新（Manifest Digest 變動）。
-- **自動化流程**：更新 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json) → 提交並建立 GitHub Release → 呼叫 [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 完成 Hadolint、ShellCheck、Compose 端對端健康檢查測試、Trivy 弱點掃描，最後推送包含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR。
+- **自動化流程**：偵測到更新時，先建立或更新 `chore/auto-update` 分支（同步修改 `VERSION` / `Dockerfile` / `.base-digest` / [`arcane/registry.json`](arcane/registry.json)）並自動開立 Pull Request（支援嘗試啟用 squash Auto-merge）→ 通過 `main` 分支 Ruleset 的 3 項必要檢查（Hadolint / ShellCheck、Release 資產解析、Compose 端對端煙霧測試與 Trivy 掃描）並合併至 `main` 後 → [`build-and-publish.yml`](.github/workflows/build-and-publish.yml) 自動建置並推送含 SBOM 與 SLSA Provenance 的新映像檔至 GHCR，且建立對應的 GitHub Release；若手動觸發 `force_rebuild` 且無檔案異動，則直接重新建置與發布。
+- **全自動 PR 檢查權杖（選用）**：因 GitHub 預設會阻擋 `GITHUB_TOKEN` 開立的 PR 自動觸發 `pull_request` 工作流程，若希望每日自動 PR 不需手動「關閉後重開」即可自動執行檢查並啟用 Auto-merge，可於 **Settings → Secrets and variables → Actions** 建立 Fine-grained PAT Secret `AUTO_UPDATE_TOKEN`（僅需本儲存庫 `Contents: Read and write` 與 `Pull requests: Read and write` 權限）。
 - **搭配 Arcane Auto-Updater**：只要 Compose 中追蹤 `:3` 標籤並保留 `com.getarcaneapp.arcane.updater=true`，Arcane 就會在冷卻期後自動下載（pull）並重建容器。
 
 ---

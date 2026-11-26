@@ -20,4 +20,4 @@ description: >-
 
 3. **驗證與發布**
    - 執行 `validate-repo` 技能完成本機檢查。
-   - 若直接透過 GitHub 自動化流程更新，前往 GitHub Actions 執行 `.github/workflows/auto-update.yml`（可指定 `target_version` 或勾選 `force_rebuild`），確認 `build-and-publish.yml` 的 Hadolint、ShellCheck、Compose 冒煙測試與 Trivy 掃描皆通過。
+   - 若直接透過 GitHub 自動化流程更新，前往 GitHub Actions 執行 `.github/workflows/auto-update.yml`（可指定 `target_version` 或勾選 `force_rebuild`）：偵測到版號或基底映像檔變動時，會自動建立或更新 `chore/auto-update` Pull Request 以通過 `main` 分支 Ruleset 檢查，合併至 `main` 後由 `build-and-publish.yml` 發布映像檔並建立 GitHub Release；若無檔案異動且勾選 `force_rebuild`，則會直接呼叫 `build-and-publish.yml` 重新建置並發布（需確認 Hadolint、ShellCheck、Compose 冒煙測試與 Trivy 掃描皆通過）。
