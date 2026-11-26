@@ -183,6 +183,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
       security-events: write
     steps:
       - name: Checkout repository
@@ -277,6 +278,67 @@ jobs:
           docker logs aspia-router 2>&1 | sed -E 's/(Password:[[:space:]]*).*/\1[REDACTED]/g'
           echo "=== Relay Logs ==="
           docker logs aspia-relay 2>&1
+
+      - name: Run Compose upgrade compatibility smoke test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASPIA_RELAY_PUBLIC_ADDRESS: 127.0.0.1
+        run: |
+          set -euo pipefail
+
+          repo_lower="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          prev_prefix="ghcr.io/${repo_lower}"
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null 2>&1 || true
+
+          if ! docker pull "${prev_prefix}/router:latest" >/dev/null 2>&1 \
+            || ! docker pull "${prev_prefix}/relay:latest" >/dev/null 2>&1; then
+            echo "::notice::Published :latest images not found or inaccessible for ${prev_prefix}; skipping upgrade compatibility test."
+            exit 0
+          fi
+
+          cleanup() {
+            IMAGE_PREFIX=aspia-local ASPIA_IMAGE_TAG=test docker compose down -v --remove-orphans || true
+          }
+          trap cleanup EXIT
+
+          wait_healthy() {
+            deadline=$((SECONDS + 60))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              router_health="$(docker inspect -f '{{.State.Health.Status}}' aspia-router 2>/dev/null || echo 'starting')"
+              relay_health="$(docker inspect -f '{{.State.Health.Status}}' aspia-relay 2>/dev/null || echo 'starting')"
+              echo "Upgrade test healthcheck -> aspia-router: ${router_health}, aspia-relay: ${relay_health}"
+              if [ "$router_health" = "healthy" ] && [ "$relay_health" = "healthy" ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            [ "$(docker inspect -f '{{.State.Health.Status}}' aspia-router)" = "healthy" ]
+            [ "$(docker inspect -f '{{.State.Health.Status}}' aspia-relay)" = "healthy" ]
+          }
+
+          # 階段 1：使用已發布的 :latest 映像檔初始化既有磁碟區與自訂 [smtp] 設定區段
+          IMAGE_PREFIX="$prev_prefix" ASPIA_IMAGE_TAG="latest" docker compose up -d
+          wait_healthy
+
+          prev_host_pub="$(docker exec aspia-router cat /etc/aspia/host.pub)"
+          prev_relay_pub="$(docker exec aspia-router cat /etc/aspia/relay.pub)"
+          [ -n "$prev_host_pub" ] && [ -n "$prev_relay_pub" ]
+          docker exec aspia-router test -s /var/lib/aspia/router.db3
+          docker exec aspia-router sh -c 'printf "\n[smtp]\nserver=smtp.example.com\n" >> /etc/aspia/router.conf'
+
+          # 階段 2：保留既有磁碟區並原地切換為本次建置的新版映像檔
+          IMAGE_PREFIX="aspia-local" ASPIA_IMAGE_TAG="test" docker compose up -d --force-recreate
+          wait_healthy
+
+          [ "$(docker exec aspia-router cat /etc/aspia/host.pub)" = "$prev_host_pub" ]
+          [ "$(docker exec aspia-router cat /etc/aspia/relay.pub)" = "$prev_relay_pub" ]
+          [ "$(docker exec aspia-relay cat /run/aspia-keys/relay.pub)" = "$prev_relay_pub" ]
+          docker exec aspia-router test -s /var/lib/aspia/router.db3
+          docker exec aspia-router grep -qx 'server=smtp.example.com' /etc/aspia/router.conf
+
+          echo "Upgrade compatibility smoke test passed (${prev_prefix}:latest -> aspia-local:test)."
 
       - name: Scan Router image with Trivy (table)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
